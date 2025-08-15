@@ -16,17 +16,21 @@ import altair as alt
 # Dataset URL
 DATASET_URL = "https://raw.githubusercontent.com/jbrownlee/Datasets/master/pima-indians-diabetes.csv"
 
-# Metrics file path (optional, for deployment)
-METRICS_PATH = 'metrics.json'  # Relative path for Streamlit Cloud
+# Metrics file path (optional, for persistence)
+METRICS_PATH = 'metrics.json'
 
-# Cache dataset loading to improve performance
+# Cache dataset loading
 @st.cache_data
 def load_data():
-    names = ['Pregnancies', 'Glucose', 'BloodPressure', 'SkinThickness', 'Insulin', 'BMI', 'DiabetesPedigreeFunction', 'Age', 'Outcome']
-    data = pd.read_csv(DATASET_URL, names=names)
-    return data
+    try:
+        names = ['Pregnancies', 'Glucose', 'BloodPressure', 'SkinThickness', 'Insulin', 'BMI', 'DiabetesPedigreeFunction', 'Age', 'Outcome']
+        data = pd.read_csv(DATASET_URL, names=names)
+        return data
+    except Exception as e:
+        st.error(f"Failed to load dataset: {str(e)}")
+        st.stop()
 
-# Cache model training to avoid retraining on every interaction
+# Cache model training
 @st.cache_resource
 def train_models():
     data = load_data()
@@ -36,9 +40,9 @@ def train_models():
 
     models = {
         'LogisticRegression': LogisticRegression(max_iter=200),
-        'RandomForest': RandomForestClassifier(),
-        'SVM': SVC(probability=True),
-        'DecisionTree': DecisionTreeClassifier(),
+        'RandomForest': RandomForestClassifier(random_state=42),
+        'SVM': SVC(probability=True, random_state=42),
+        'DecisionTree': DecisionTreeClassifier(random_state=42),
         'KNN': KNeighborsClassifier()
     }
 
@@ -60,12 +64,12 @@ def train_models():
             best_model = model
             best_name = name
 
-    # Save metrics to file (optional, for persistence)
+    # Save metrics to file (optional)
     try:
         with open(METRICS_PATH, 'w') as f:
             json.dump(metrics, f)
-    except Exception as e:
-        st.warning(f"Could not save metrics to {METRICS_PATH}: {str(e)}")
+    except Exception:
+        pass  # Silent fail if metrics can't be saved
 
     return best_model, best_name, metrics, X_train, X_test, y_train, y_test
 
@@ -76,16 +80,16 @@ try:
     y = data['Outcome']
     best_model, best_model_name, metrics, X_train, X_test, y_train, y_test = train_models()
 except Exception as e:
-    st.error(f"Failed to load data or train model: {str(e)}")
+    st.error(f"Failed to train model: {str(e)}")
     st.stop()
 
-# Load metrics from file ifSamir
+# Load metrics from file if available
 try:
     with open(METRICS_PATH, 'r') as f:
         saved_metrics = json.load(f)
     metrics.update(saved_metrics)
 except FileNotFoundError:
-    st.warning(f"Metrics file not found at {METRICS_PATH}. Using computed metrics.")
+    pass  # Use computed metrics
 
 # App Title and Description
 st.title("Advanced Diabetes Prediction System")
