@@ -1,9 +1,3 @@
-
-# all_in_one_imdb_sentiment_analysis.py
-# Run with: streamlit run all_in_one_imdb_sentiment_analysis.py
-# Trains TF-IDF, Word2Vec, and BERT models on IMDB dataset, saves them, and provides a Streamlit UI for sentiment prediction.
-# Avoids NLTK by using Python string operations and a hardcoded stopword list.
-
 import os
 import sys
 import subprocess
@@ -13,10 +7,20 @@ import numpy as np
 import re
 import string
 import streamlit as st
-from datasets import load_dataset
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
+try:
+    from datasets import load_dataset
+except ModuleNotFoundError:
+    st.error("Installing datasets...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "datasets"])
+    os.execv(sys.executable, ['python'] + sys.argv)
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import train_test_split
+except ModuleNotFoundError:
+    st.error("Installing scikit-learn...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "scikit-learn"])
+    os.execv(sys.executable, ['python'] + sys.argv)
 try:
     from gensim.models import Word2Vec
 except ModuleNotFoundError:
@@ -30,20 +34,22 @@ except ModuleNotFoundError:
     st.error("Installing transformers and torch...")
     subprocess.run([sys.executable, "-m", "pip", "install", "transformers", "torch"])
     os.execv(sys.executable, ['python'] + sys.argv)
+try:
+    import joblib
+except ModuleNotFoundError:
+    st.error("Installing joblib...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "joblib"])
+    os.execv(sys.executable, ['python'] + sys.argv)
 import random
 
-# Install additional dependencies
-def install_dependencies():
-    dependencies = ["datasets", "scikit-learn", "joblib"]
-    for dep in dependencies:
-        try:
-            __import__(dep)
-        except ModuleNotFoundError:
-            st.error(f"Installing {dep}...")
-            subprocess.run([sys.executable, "-m", "pip", "install", dep])
-            os.execv(sys.executable, ['python'] + sys.argv)
+# Set random seeds for reproducibility
+random.seed(42)
+np.random.seed(42)
+torch.manual_seed(42)
 
-install_dependencies()
+# Create models directory
+MODELS_DIR = "models"
+os.makedirs(MODELS_DIR, exist_ok=True)
 
 # Hardcoded stopwords list
 stop_words = {
@@ -58,15 +64,6 @@ stop_words = {
     'above', 'below', 'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off',
     'over', 'under', 'again', 'further', 'then', 'once'
 }
-
-# Set random seeds for reproducibility
-random.seed(42)
-np.random.seed(42)
-torch.manual_seed(42)
-
-# Create models directory
-MODELS_DIR = "models"
-os.makedirs(MODELS_DIR, exist_ok=True)
 
 # Preprocessing function (no NLTK)
 def preprocess_text(text):
@@ -98,7 +95,12 @@ def train_and_save_models():
     st.info("Training models... This may take a while.")
 
     # Load IMDB dataset
-    imdb = load_dataset("imdb")
+    try:
+        imdb = load_dataset("imdb")
+    except Exception as e:
+        st.error(f"Failed to load IMDB dataset: {e}")
+        st.stop()
+
     train_data = imdb['train']
     test_data = imdb['test']
 
@@ -278,4 +280,3 @@ if st.button("Analyze Sentiment", type="primary"):
 # Footer
 st.markdown("---")
 st.caption("Built with Streamlit. Models trained on IMDB dataset.")
-
