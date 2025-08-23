@@ -1,18 +1,25 @@
 # all_in_one_imdb_sentiment_analysis.py
-# This script combines data loading, preprocessing, training of TF-IDF, Word2Vec, and BERT models (using embeddings + LR),
-# saves the models, and provides a Streamlit UI for sentiment prediction on user input reviews.
-# Run this script with: streamlit run all_in_one_imdb_sentiment_analysis.py
-# Models are trained and saved only if they don't exist in the 'models' directory.
-# BERT uses a subset for training due to computational constraints.
-# Improvements: Caching for model loading, user-friendly UI with model selection, confidence scores, examples, and error handling.
+# Run with: streamlit run all_in_one_imdb_sentiment_analysis.py
+# Combines data loading, preprocessing, training of TF-IDF, Word2Vec, and BERT models,
+# saves models to a 'models' directory, and provides a Streamlit UI for sentiment prediction.
+# Fixes NLTK import error by ensuring installation and resource downloads.
+
 import os
 import joblib
 import pandas as pd
 import numpy as np
 import re
-import nltk
-from nltk.tokenize import word_tokenize
-from nltk.corpus import stopwords
+import streamlit as st
+try:
+    import nltk
+    from nltk.tokenize import word_tokenize
+    from nltk.corpus import stopwords
+except ModuleNotFoundError:
+    st.error("Installing NLTK...")
+    os.system("pip install nltk")
+    import nltk
+    from nltk.tokenize import word_tokenize
+    from nltk.corpus import stopwords
 from datasets import load_dataset
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -21,19 +28,27 @@ from gensim.models import Word2Vec
 from transformers import BertTokenizer, BertModel
 import torch
 import random
-import streamlit as st
+
+# Install required packages
+st.info("Ensuring all dependencies are installed...")
+os.system("pip install datasets transformers torch gensim scikit-learn joblib")
+
+# Download NLTK resources with error handling
+try:
+    nltk.data.find('tokenizers/punkt')
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    st.info("Downloading NLTK resources...")
+    nltk.download('punkt', quiet=True)
+    nltk.download('stopwords', quiet=True)
+stop_words = set(stopwords.words('english'))
 
 # Set random seeds for reproducibility
 random.seed(42)
 np.random.seed(42)
 torch.manual_seed(42)
 
-# Download NLTK resources
-nltk.download('punkt', quiet=True)
-nltk.download('stopwords', quiet=True)
-stop_words = set(stopwords.words('english'))
-
-# Create models directory if it doesn't exist
+# Create models directory
 MODELS_DIR = "models"
 os.makedirs(MODELS_DIR, exist_ok=True)
 
@@ -44,12 +59,12 @@ def preprocess_text(text):
     text = re.sub(r'[^\w\s]', '', text)
     tokens = word_tokenize(text)
     tokens = [token for token in tokens if token not in stop_words]
-    return ' '.join(tokens)
+    return ' '.join(tokens), tokens  # Return both processed text and tokens
 
-# Function to train and save models if not already saved
+# Function to train and save models
 @st.cache_resource(show_spinner="Training models if not already done...")
 def train_and_save_models():
-    # Check if all models are already saved
+    # Check if models exist
     if (os.path.exists(os.path.join(MODELS_DIR, "tfidf_vec.joblib")) and
         os.path.exists(os.path.join(MODELS_DIR, "tfidf_lr.joblib")) and
         os.path.exists(os.path.join(MODELS_DIR, "w2v.model")) and
@@ -57,7 +72,7 @@ def train_and_save_models():
         os.path.exists(os.path.join(MODELS_DIR, "bert_model")) and
         os.path.exists(os.path.join(MODELS_DIR, "bert_tokenizer")) and
         os.path.exists(os.path.join(MODELS_DIR, "bert_lr.joblib"))):
-        st.info("Models already trained and saved. Skipping training.")
+        st.info("Models already trained and saved.")
         return
 
     st.info("Training models... This may take a while.")
@@ -75,9 +90,9 @@ def train_and_save_models():
     train_df, val_df = train_test_split(train_df, test_size=0.2, random_state=42, stratify=train_df['label'])
 
     # Preprocess
-    train_df['processed_text'] = train_df['text'].apply(preprocess_text)
-    val_df['processed_text'] = val_df['text'].apply(preprocess_text)
-    test_df['processed_text'] = test_df['text'].apply(preprocess_text)
+    train_df['processed_text'], train_df['tokens'] = zip(*train_df['text'].apply(preprocess_text))
+    val_df['processed_text'], val_df['tokens'] = zip(*val_df['text'].apply(preprocess_text))
+    test_df['processed_text'], test_df['tokens'] = zip(*test_df['text'].apply(preprocess_text))
 
     y_train = train_df['label']
     y_test = test_df['label']
@@ -94,16 +109,14 @@ def train_and_save_models():
     joblib.dump(tfidf_model, os.path.join(MODELS_DIR, "tfidf_lr.joblib"))
 
     # Word2Vec
-    train_tokens = [word_tokenize(text) for text in train_df['processed_text']]
-    word2vec_model = Word2Vec(sentences=train_tokens, vector_size=100, window=5, min_count=1, workers=4, seed=42)
+    word2vec_model = Word2Vec(sentences=train_df['tokens'], vector_size=100, window=5, min_count=1, workers=4, seed=42)
 
     def get_doc_embedding(tokens, model):
         vectors = [model.wv[word] for word in tokens if word in model.wv]
         return np.mean(vectors, axis=0) if vectors else np.zeros(model.vector_size)
 
-    X_train_w2v = np.array([get_doc_embedding(tokens, word2vec_model) for tokens in train_tokens])
-    X_test_tokens = [word_tokenize(text) for text in test_df['processed_text']]
-    X_test_w2v = np.array([get_doc_embedding(tokens, word2vec_model) for tokens in X_test_tokens])
+    X_train_w2v = np.array([get_doc_embedding(tokens, word2vec_model) for tokens in train_df['tokens']])
+    X_test_w2v = np.array([get_doc_embedding(tokens, word2vec_model) for tokens in test_df['tokens']])
 
     w2v_model = LogisticRegression(max_iter=1000, random_state=42)
     w2v_model.fit(X_train_w2v, y_train)
@@ -111,7 +124,7 @@ def train_and_save_models():
     word2vec_model.save(os.path.join(MODELS_DIR, "w2v.model"))
     joblib.dump(w2v_model, os.path.join(MODELS_DIR, "w2v_lr.joblib"))
 
-    # BERT (using subset for efficiency)
+    # BERT (subset for efficiency)
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     bert_model = BertModel.from_pretrained('bert-base-uncased')
 
@@ -128,7 +141,6 @@ def train_and_save_models():
     train_subset = train_df['processed_text'].iloc[:2000]
     test_subset = test_df['processed_text'].iloc[:1000]
     y_train_subset = train_df['label'].iloc[:2000]
-    y_test_subset = test_df['label'].iloc[:1000]
 
     X_train_bert = get_bert_embeddings(train_subset.tolist())
     X_test_bert = get_bert_embeddings(test_subset.tolist())
@@ -140,9 +152,9 @@ def train_and_save_models():
     tokenizer.save_pretrained(os.path.join(MODELS_DIR, "bert_tokenizer"))
     joblib.dump(bert_model_lr, os.path.join(MODELS_DIR, "bert_lr.joblib"))
 
-    st.success("Models trained and saved successfully!")
+    st.success("Models trained and saved!")
 
-# Load models with caching
+# Load models
 @st.cache_resource
 def load_models(model_type):
     if model_type == "TF-IDF":
@@ -161,22 +173,21 @@ def load_models(model_type):
 
 # Prediction functions
 def predict_tfidf(review, vectorizer, model):
-    processed = preprocess_text(review)
+    processed, _ = preprocess_text(review)
     vec = vectorizer.transform([processed])
     pred = model.predict(vec)[0]
     prob = model.predict_proba(vec)[0][1] if pred == 1 else model.predict_proba(vec)[0][0]
     return "Positive" if pred == 1 else "Negative", prob
 
 def predict_w2v(review, w2v, model):
-    processed = preprocess_text(review)
-    tokens = word_tokenize(processed)
+    processed, tokens = preprocess_text(review)
     embedding = np.mean([w2v.wv[word] for word in tokens if word in w2v.wv], axis=0) if tokens else np.zeros(w2v.vector_size)
     pred = model.predict([embedding])[0]
     prob = model.predict_proba([embedding])[0][1] if pred == 1 else model.predict_proba([embedding])[0][0]
     return "Positive" if pred == 1 else "Negative", prob
 
 def predict_bert(review, tokenizer, bert, model):
-    processed = preprocess_text(review)
+    processed, _ = preprocess_text(review)
     inputs = tokenizer([processed], return_tensors='pt', max_length=128, truncation=True, padding=True)
     with torch.no_grad():
         outputs = bert(**inputs)
@@ -191,7 +202,7 @@ st.set_page_config(page_title="IMDB Sentiment Analyzer", page_icon="🎥", layou
 st.title("🎬 IMDB Movie Review Sentiment Analyzer")
 st.markdown("Train models (if not done), select a model, enter a review, and get the sentiment prediction!")
 
-# Train models button (trains only if not saved)
+# Train models button
 if st.button("Train Models (if not already trained)"):
     train_and_save_models()
 
@@ -199,13 +210,16 @@ if st.button("Train Models (if not already trained)"):
 model_type = st.selectbox("Select Model:", ["TF-IDF", "Word2Vec", "BERT"])
 
 # Load selected model
-if model_type == "BERT":
-    tokenizer, bert, lr_model = load_models(model_type)
-else:
-    if model_type == "TF-IDF":
+try:
+    if model_type == "BERT":
+        tokenizer, bert, lr_model = load_models(model_type)
+    elif model_type == "TF-IDF":
         vectorizer, lr_model = load_models(model_type)
     else:  # Word2Vec
         w2v, lr_model = load_models(model_type)
+except FileNotFoundError:
+    st.error("Models not found. Please train the models first by clicking 'Train Models'.")
+    st.stop()
 
 # Sidebar for examples
 st.sidebar.header("Quick Examples")
