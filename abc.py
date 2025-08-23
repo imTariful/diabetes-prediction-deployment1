@@ -1,10 +1,11 @@
 # all_in_one_imdb_sentiment_analysis.py
 # Run with: streamlit run all_in_one_imdb_sentiment_analysis.py
-# Combines data loading, preprocessing, training of TF-IDF, Word2Vec, and BERT models,
-# saves models to a 'models' directory, and provides a Streamlit UI for sentiment prediction.
-# Fixes NLTK import error by ensuring installation and resource downloads.
+# Trains TF-IDF, Word2Vec, and BERT models on IMDB dataset, saves them, and provides a Streamlit UI for sentiment prediction.
+# Fixes NLTK import error by ensuring installation in the virtual environment and restarting Python if needed.
 
 import os
+import sys
+import subprocess
 import joblib
 import pandas as pd
 import numpy as np
@@ -16,24 +17,45 @@ try:
     from nltk.corpus import stopwords
 except ModuleNotFoundError:
     st.error("Installing NLTK...")
-    os.system("pip install nltk")
-    import nltk
-    from nltk.tokenize import word_tokenize
-    from nltk.corpus import stopwords
+    subprocess.run([sys.executable, "-m", "pip", "install", "nltk"])
+    # Restart Python process to ensure NLTK is recognized
+    os.execv(sys.executable, ['python'] + sys.argv)
+
 from datasets import load_dataset
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-from gensim.models import Word2Vec
-from transformers import BertTokenizer, BertModel
-import torch
+try:
+    from gensim.models import Word2Vec
+except ModuleNotFoundError:
+    st.error("Installing gensim...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "gensim"])
+    os.execv(sys.executable, ['python'] + sys.argv)
+
+try:
+    from transformers import BertTokenizer, BertModel
+    import torch
+except ModuleNotFoundError:
+    st.error("Installing transformers and torch...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "transformers", "torch"])
+    os.execv(sys.executable, ['python'] + sys.argv)
+
 import random
 
-# Install required packages
-st.info("Ensuring all dependencies are installed...")
-os.system("pip install datasets transformers torch gensim scikit-learn joblib")
+# Install additional dependencies
+def install_dependencies():
+    dependencies = ["datasets", "scikit-learn", "joblib"]
+    for dep in dependencies:
+        try:
+            __import__(dep)
+        except ModuleNotFoundError:
+            st.error(f"Installing {dep}...")
+            subprocess.run([sys.executable, "-m", "pip", "install", dep])
+            os.execv(sys.executable, ['python'] + sys.argv)
 
-# Download NLTK resources with error handling
+install_dependencies()
+
+# Download NLTK resources
 try:
     nltk.data.find('tokenizers/punkt')
     nltk.data.find('corpora/stopwords')
@@ -59,12 +81,11 @@ def preprocess_text(text):
     text = re.sub(r'[^\w\s]', '', text)
     tokens = word_tokenize(text)
     tokens = [token for token in tokens if token not in stop_words]
-    return ' '.join(tokens), tokens  # Return both processed text and tokens
+    return ' '.join(tokens), tokens
 
-# Function to train and save models
+# Train and save models
 @st.cache_resource(show_spinner="Training models if not already done...")
 def train_and_save_models():
-    # Check if models exist
     if (os.path.exists(os.path.join(MODELS_DIR, "tfidf_vec.joblib")) and
         os.path.exists(os.path.join(MODELS_DIR, "tfidf_lr.joblib")) and
         os.path.exists(os.path.join(MODELS_DIR, "w2v.model")) and
