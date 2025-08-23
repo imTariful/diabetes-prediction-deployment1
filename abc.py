@@ -1,4 +1,4 @@
-```python
+
 # all_in_one_imdb_sentiment_analysis.py
 # Run with: streamlit run all_in_one_imdb_sentiment_analysis.py
 # Trains TF-IDF, Word2Vec, and BERT models on IMDB dataset, saves them, and provides a Streamlit UI for sentiment prediction.
@@ -278,4 +278,4 @@ if st.button("Analyze Sentiment", type="primary"):
 # Footer
 st.markdown("---")
 st.caption("Built with Streamlit. Models trained on IMDB dataset.")
-```
+
