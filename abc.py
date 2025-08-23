@@ -1,7 +1,8 @@
+```python
 # all_in_one_imdb_sentiment_analysis.py
 # Run with: streamlit run all_in_one_imdb_sentiment_analysis.py
 # Trains TF-IDF, Word2Vec, and BERT models on IMDB dataset, saves them, and provides a Streamlit UI for sentiment prediction.
-# Fixes NLTK import error by ensuring installation in the virtual environment and restarting Python if needed.
+# Avoids NLTK by using Python string operations and a hardcoded stopword list.
 
 import os
 import sys
@@ -10,17 +11,8 @@ import joblib
 import pandas as pd
 import numpy as np
 import re
+import string
 import streamlit as st
-try:
-    import nltk
-    from nltk.tokenize import word_tokenize
-    from nltk.corpus import stopwords
-except ModuleNotFoundError:
-    st.error("Installing NLTK...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "nltk"])
-    # Restart Python process to ensure NLTK is recognized
-    os.execv(sys.executable, ['python'] + sys.argv)
-
 from datasets import load_dataset
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -31,7 +23,6 @@ except ModuleNotFoundError:
     st.error("Installing gensim...")
     subprocess.run([sys.executable, "-m", "pip", "install", "gensim"])
     os.execv(sys.executable, ['python'] + sys.argv)
-
 try:
     from transformers import BertTokenizer, BertModel
     import torch
@@ -39,7 +30,6 @@ except ModuleNotFoundError:
     st.error("Installing transformers and torch...")
     subprocess.run([sys.executable, "-m", "pip", "install", "transformers", "torch"])
     os.execv(sys.executable, ['python'] + sys.argv)
-
 import random
 
 # Install additional dependencies
@@ -55,15 +45,19 @@ def install_dependencies():
 
 install_dependencies()
 
-# Download NLTK resources
-try:
-    nltk.data.find('tokenizers/punkt')
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    st.info("Downloading NLTK resources...")
-    nltk.download('punkt', quiet=True)
-    nltk.download('stopwords', quiet=True)
-stop_words = set(stopwords.words('english'))
+# Hardcoded stopwords list
+stop_words = {
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'he',
+    'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the', 'to', 'was', 'were',
+    'will', 'with', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'you',
+    'your', 'yours', 'they', 'them', 'their', 'what', 'which', 'who', 'whom',
+    'this', 'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be',
+    'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'doing', 'but',
+    'if', 'or', 'because', 'until', 'while', 'of', 'at', 'by', 'for', 'with',
+    'about', 'against', 'between', 'into', 'through', 'during', 'before', 'after',
+    'above', 'below', 'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off',
+    'over', 'under', 'again', 'further', 'then', 'once'
+}
 
 # Set random seeds for reproducibility
 random.seed(42)
@@ -74,12 +68,17 @@ torch.manual_seed(42)
 MODELS_DIR = "models"
 os.makedirs(MODELS_DIR, exist_ok=True)
 
-# Preprocessing function
+# Preprocessing function (no NLTK)
 def preprocess_text(text):
+    # Lowercase
     text = text.lower()
+    # Remove HTML tags
     text = re.sub(r'<[^>]+>', '', text)
-    text = re.sub(r'[^\w\s]', '', text)
-    tokens = word_tokenize(text)
+    # Remove punctuation
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    # Tokenize
+    tokens = text.split()
+    # Remove stopwords
     tokens = [token for token in tokens if token not in stop_words]
     return ' '.join(tokens), tokens
 
@@ -279,3 +278,4 @@ if st.button("Analyze Sentiment", type="primary"):
 # Footer
 st.markdown("---")
 st.caption("Built with Streamlit. Models trained on IMDB dataset.")
+```
