@@ -1,98 +1,116 @@
-# app.py
+# abc.py
 import streamlit as st
-import spacy
+import pandas as pd
+import numpy as np
+import re
+import string
 import nltk
 from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize, sent_tokenize
-from transformers import pipeline
+from nltk.stem import WordNetLemmatizer
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 import plotly.express as px
-from wordcloud import WordCloud
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
-# ========== Setup ==========
-st.set_page_config(page_title="NLP Preprocessing App", layout="wide")
-
-# Download resources
-nltk.download("punkt")
+# Download NLTK resources
 nltk.download("stopwords")
+nltk.download("wordnet")
 
+# Initialize lemmatizer
+lemmatizer = WordNetLemmatizer()
 stop_words = set(stopwords.words("english"))
-nlp = spacy.load("en_core_web_sm")
-hf_sentiment = pipeline("sentiment-analysis")
 
-# ========== Functions ==========
-def preprocess_text(text):
-    # Sentence Tokenization
-    sentences = sent_tokenize(text)
+# ============ STREAMLIT APP ============
+st.set_page_config(page_title="Diabetes Prediction App", layout="wide")
 
-    # Word Tokenization
-    words = word_tokenize(text.lower())
+st.title("🩺 Diabetes Prediction with ML")
+st.markdown("Upload your dataset, preprocess, train a model, and predict diabetes risk.")
 
-    # Remove Stopwords
-    filtered_words = [w for w in words if w.isalpha() and w not in stop_words]
+# -------- File Upload --------
+uploaded_file = st.file_uploader("📂 Upload CSV Dataset", type=["csv"])
 
-    # Lemmatization with spaCy
-    doc = nlp(" ".join(filtered_words))
-    lemmas = [token.lemma_ for token in doc]
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    st.subheader("🔍 Raw Dataset Preview")
+    st.dataframe(df.head())
 
-    return sentences, words, filtered_words, lemmas
+    # -------- Data Preprocessing --------
+    def clean_text(text):
+        if not isinstance(text, str):
+            return ""
+        text = text.lower()
+        text = re.sub(f"[{re.escape(string.punctuation)}]", "", text)  # remove punctuation
+        text = re.sub(r"\d+", "", text)  # remove numbers
+        tokens = text.split()
+        tokens = [w for w in tokens if w not in stop_words]
+        tokens = [lemmatizer.lemmatize(w) for w in tokens]
+        return " ".join(tokens)
 
+    st.subheader("⚙️ Data Preprocessing")
+    text_cols = df.select_dtypes(include=["object"]).columns.tolist()
 
-def plot_word_frequency(words):
-    word_freq = {}
-    for w in words:
-        word_freq[w] = word_freq.get(w, 0) + 1
+    if text_cols:
+        st.write(f"Cleaning text columns: {text_cols}")
+        for col in text_cols:
+            df[col] = df[col].astype(str).apply(clean_text)
 
-    df = [{"word": k, "count": v} for k, v in word_freq.items()]
-    fig = px.bar(df, x="word", y="count", title="Word Frequency", text="count")
-    return fig
+    st.success("✅ Preprocessing Completed")
+    st.dataframe(df.head())
 
+    # -------- Train/Test Split --------
+    st.subheader("📊 Train Model")
+    target_col = st.selectbox("Select Target Column", df.columns)
 
-def plot_wordcloud(words):
-    wordcloud = WordCloud(width=800, height=400, background_color="white").generate(" ".join(words))
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.imshow(wordcloud, interpolation="bilinear")
-    ax.axis("off")
-    return fig
+    if target_col:
+        X = df.drop(columns=[target_col])
+        y = df[target_col]
 
+        # Handle categorical
+        X = pd.get_dummies(X, drop_first=True)
 
-# ========== Streamlit UI ==========
-st.title("📝 NLP Preprocessing & Visualization")
-st.markdown("An **all-in-one text preprocessing app** with Tokenization, Lemmatization, Stopwords Removal, WordCloud, and Sentiment Analysis.")
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
 
-# Input Text
-text_input = st.text_area("Enter your text:", height=200)
+        model = RandomForestClassifier(random_state=42)
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
 
-if st.button("Process Text"):
-    if text_input.strip() == "":
-        st.warning("⚠️ Please enter some text!")
-    else:
-        # Preprocess
-        sentences, words, filtered_words, lemmas = preprocess_text(text_input)
+        acc = accuracy_score(y_test, y_pred)
+        st.metric("🎯 Model Accuracy", f"{acc:.2%}")
 
-        col1, col2 = st.columns(2)
+        # -------- Confusion Matrix --------
+        cm = confusion_matrix(y_test, y_pred)
+        fig_cm = px.imshow(
+            cm,
+            text_auto=True,
+            color_continuous_scale="Blues",
+            title="Confusion Matrix",
+        )
+        st.plotly_chart(fig_cm, use_container_width=True)
 
-        with col1:
-            st.subheader("🔹 Original Sentences")
-            st.write(sentences)
+        # -------- Feature Importance --------
+        feature_importance = pd.DataFrame(
+            {"Feature": X.columns, "Importance": model.feature_importances_}
+        ).sort_values(by="Importance", ascending=False)
 
-            st.subheader("🔹 Tokenized Words")
-            st.write(words)
+        fig_imp = px.bar(
+            feature_importance.head(10),
+            x="Importance",
+            y="Feature",
+            orientation="h",
+            title="Top 10 Important Features",
+        )
+        st.plotly_chart(fig_imp, use_container_width=True)
 
-            st.subheader("🔹 Without Stopwords")
-            st.write(filtered_words)
+        # -------- Make Prediction --------
+        st.subheader("🧑‍⚕️ Predict Diabetes")
+        user_input = {}
+        for col in X.columns:
+            val = st.number_input(f"Enter {col}", float(X[col].min()), float(X[col].max()))
+            user_input[col] = val
 
-            st.subheader("🔹 Lemmatized Words")
-            st.write(lemmas)
-
-        with col2:
-            st.subheader("📊 Word Frequency Visualization")
-            st.plotly_chart(plot_word_frequency(filtered_words))
-
-            st.subheader("☁️ WordCloud")
-            st.pyplot(plot_wordcloud(filtered_words))
-
-        # Sentiment Analysis
-        st.subheader("💡 Sentiment Analysis (Hugging Face)")
-        sentiment_results = hf_sentiment(text_input)
-        st.json(sentiment_results)
+        input_df = pd.DataFrame([user_input])
+        prediction = model.predict(input_df)[0]
+        st.success(f"✅ Prediction: {prediction}")
