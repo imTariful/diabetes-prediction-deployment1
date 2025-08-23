@@ -5,7 +5,7 @@
 # Models are trained and saved only if they don't exist in the 'models' directory.
 # BERT uses a subset for training due to computational constraints.
 # Improvements: Caching for model loading, user-friendly UI with model selection, confidence scores, examples, and error handling.
-
+!pip install nltk
 import os
 import joblib
 import pandas as pd
