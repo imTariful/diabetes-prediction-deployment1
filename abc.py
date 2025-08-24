@@ -1,9 +1,8 @@
 import streamlit as st
-import numpy as np
-from tensorflow.keras.datasets import imdb
+import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score
 
@@ -16,45 +15,39 @@ st.markdown("<p style='text-align:center; color:gray;'>Predict if a movie review
 st.write("---")
 
 # ----------------------
-# Load IMDb dataset
+# Sample IMDb data (replace with larger CSV if needed)
+# ----------------------
+data = {
+    "review": [
+        "I loved this movie, it was fantastic and thrilling!",
+        "Worst movie ever, completely boring and slow.",
+        "An amazing experience, would watch again.",
+        "Terrible plot and bad acting, do not recommend.",
+        "A wonderful film, very entertaining.",
+        "Awful movie, wasted my time."
+    ],
+    "sentiment": [1, 0, 1, 0, 1, 0]  # 1 = Positive, 0 = Negative
+}
+df = pd.DataFrame(data)
+
+# ----------------------
+# Train TF-IDF + Logistic Regression
 # ----------------------
 @st.cache_resource
-def load_imdb_data(num_words=10000):
-    (X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=num_words)
-    word_index = imdb.get_word_index()
-    index_word = {v + 3: k for k, v in word_index.items()}
-    index_word[0] = "<PAD>"
-    index_word[1] = "<START>"
-    index_word[2] = "<UNK>"
-    index_word[3] = "<UNUSED>"
-
-    def decode_review(encoded):
-        return " ".join([index_word.get(i, "?") for i in encoded])
-
-    X_train_text = [decode_review(x) for x in X_train]
-    X_test_text = [decode_review(x) for x in X_test]
-    return X_train_text, X_test_text, y_train, y_test
-
-with st.spinner("Loading and preparing data..."):
-    X_train, X_test, y_train, y_test = load_imdb_data()
-
-# ----------------------
-# Train model
-# ----------------------
-@st.cache_resource
-def train_model(X_train, y_train, X_test, y_test):
+def train_model(df):
+    X_train, X_test, y_train, y_test = train_test_split(df["review"], df["sentiment"], test_size=0.2, random_state=42)
     pipe = Pipeline([
-        ("tfidf", TfidfVectorizer(max_features=5000, stop_words="english")),
+        ("tfidf", TfidfVectorizer(stop_words="english")),
         ("clf", LogisticRegression(max_iter=1000))
     ])
     pipe.fit(X_train, y_train)
     acc = accuracy_score(y_test, pipe.predict(X_test))
     return pipe, acc
 
-with st.spinner("Training model with TF-IDF + Logistic Regression..."):
-    model, acc = train_model(X_train, y_train, X_test, y_test)
+with st.spinner("Training model..."):
+    model, acc = train_model(df)
 
-st.success(f"✅ Model trained! Test Accuracy: {acc:.2f}")
+st.success(f"✅ Model trained! Accuracy on sample data: {acc:.2f}")
 st.write("---")
 
 # ----------------------
@@ -66,8 +59,8 @@ user_input = st.text_area("Enter a movie review:", "This movie was amazing, I re
 if st.button("Predict Sentiment"):
     prediction = model.predict([user_input])[0]
     prob = model.predict_proba([user_input])[0][prediction]
-    
-    col1, col2 = st.columns([1,2])
+
+    col1, col2 = st.columns([1, 2])
     with col1:
         if prediction == 1:
             st.markdown("<h2 style='color:green;'>😊 Positive</h2>", unsafe_allow_html=True)
