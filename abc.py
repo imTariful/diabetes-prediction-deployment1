@@ -1,33 +1,32 @@
+import os
+import subprocess
+
+# Ensure TextBlob is installed
+try:
+    from textblob import TextBlob
+except ImportError:
+    subprocess.check_call(["pip", "install", "textblob"])
+    from textblob import TextBlob
+
 import streamlit as st
-from textblob import TextBlob
 
 # Streamlit App
 st.set_page_config(page_title="Sentiment Analysis App", page_icon="😊", layout="centered")
 
-st.title("📝 Sentiment Analysis App")
-st.write("Enter a review and see if it's **Positive** or **Negative**!")
+st.title("😊 Sentiment Analysis App")
 
-# Input text
-user_input = st.text_area("✍️ Write your review here:")
+# Input
+user_input = st.text_area("Enter your review:")
 
-if st.button("Analyze Sentiment"):
-    if user_input.strip() == "":
-        st.warning("⚠️ Please enter some text to analyze.")
-    else:
-        # Sentiment Analysis
+if st.button("Analyze"):
+    if user_input.strip() != "":
         blob = TextBlob(user_input)
-        polarity = blob.sentiment.polarity
-        
-        # Display result
-        if polarity > 0:
-            st.success("✅ Positive Review")
-            st.progress(min(1.0, polarity))  # show positivity level
-        elif polarity < 0:
-            st.error("❌ Negative Review")
-            st.progress(min(1.0, abs(polarity)))  # show negativity level
+        sentiment = blob.sentiment.polarity
+        if sentiment > 0:
+            st.success("This is a Positive Review! 👍")
+        elif sentiment < 0:
+            st.error("This is a Negative Review! 👎")
         else:
-            st.info("😐 Neutral Review")
-
-# Footer
-st.write("---")
-st.caption("Built with ❤️ using Streamlit & TextBlob")
+            st.info("This review seems Neutral 😐")
+    else:
+        st.warning("Please enter some text to analyze.")
