@@ -1,13 +1,14 @@
 import streamlit as st
 import pandas as pd
-from sklearn.datasets import load_files
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score
 import nltk
-nltk.download("movie_reviews")
+
+# Download movie_reviews only if not present
+nltk.download("movie_reviews", quiet=True)
 from nltk.corpus import movie_reviews
 
 st.title("🎬 IMDb Sentiment Analysis (Scikit-learn Version)")
@@ -20,7 +21,9 @@ def train_model():
     df = pd.DataFrame({"review": docs, "sentiment": labels})
 
     # Train/test split
-    X_train, X_test, y_train, y_test = train_test_split(df["review"], df["sentiment"], test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(
+        df["review"], df["sentiment"], test_size=0.2, random_state=42
+    )
 
     # Build pipeline (TF-IDF + Logistic Regression)
     pipe = Pipeline([
