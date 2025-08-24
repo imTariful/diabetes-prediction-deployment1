@@ -1,3 +1,5 @@
+!pip install textblob
+
 import os
 import subprocess
 
