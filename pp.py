@@ -58,7 +58,6 @@ async def generate_notes(topic: str, subject: str) -> NursingNote:
 
     # Attempt to parse JSON safely
     try:
-        # Sometimes model wraps JSON in ```json ... ```
         if raw_output.strip().startswith("```"):
             raw_output = "\n".join(raw_output.strip().split("\n")[1:-1])
         data = json.loads(raw_output)
@@ -70,11 +69,27 @@ async def generate_notes(topic: str, subject: str) -> NursingNote:
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Samia's Nursing Assistant", page_icon="🩺", layout="wide")
-st.title("🩺 Samia Islam Sami - Nursing Study & Research Assistant")
-st.write("Your academic & research companion for **Nursing and Health Sciences**.")
 
-topic = st.text_input("Enter your topic (any topic you want to learn)")
-subject = st.text_input("Enter the subject area (any subject)")
+# Header
+st.markdown("""
+    <div style='background-color:#4CAF50; padding:20px; border-radius:10px'>
+        <h1 style='color:white; text-align:center;'>🩺 Samia Islam Sami - Your Nursing Assistant</h1>
+        <p style='color:white; text-align:center; font-size:18px;'>AI-powered academic & research companion for BSc Nursing students</p>
+    </div>
+""", unsafe_allow_html=True)
+
+st.markdown("---")
+
+# Input Section
+with st.container():
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        topic = st.text_input("Enter the topic you want to study")
+        subject = st.text_input("Enter the subject area")
+    with col2:
+        st.write("⚡ Quick Tips")
+        st.markdown("- Use clear topic names")
+        st.markdown("- Examples: 'Diabetes Management', 'Cardiac Nursing', 'Infection Control'")
 
 if st.button("Generate Notes"):
     if topic.strip() == "" or subject.strip() == "":
@@ -83,20 +98,32 @@ if st.button("Generate Notes"):
         with st.spinner("Generating study notes... ⏳"):
             nursing_note = asyncio.run(generate_notes(topic, subject))
 
-        # Display results
-        st.subheader("📖 Explanation")
-        st.write(nursing_note.explanation)
+        # Result Section
+        st.markdown("### 📖 Your Personalized Nursing Notes")
+        st.success(f"**Topic:** {nursing_note.topic}  |  **Subject:** {nursing_note.subject}")
 
-        st.subheader("🔑 Key Points")
+        # Explanation
+        st.markdown("#### 📝 Explanation")
+        st.info(nursing_note.explanation)
+
+        # Key Points
+        st.markdown("#### 🔑 Key Points")
         for kp in nursing_note.key_points:
             st.markdown(f"- {kp}")
 
-        st.subheader("💡 Exam Tip")
-        st.info(nursing_note.exam_tip)
+        # Exam Tip
+        st.markdown("#### 💡 Exam Tip")
+        st.warning(nursing_note.exam_tip)
 
-        st.subheader("🔬 Research Angle")
-        st.write(nursing_note.research_angle)
+        # Research Angle
+        with st.expander("🔬 Research Angle (Click to Expand)"):
+            st.write(nursing_note.research_angle)
 
-        st.subheader("📚 Further Reading Suggestions")
-        for ref in nursing_note.further_reading:
-            st.markdown(f"- {ref}")
+        # Further Reading
+        with st.expander("📚 Further Reading Suggestions (Click to Expand)"):
+            for ref in nursing_note.further_reading:
+                st.markdown(f"- {ref}")
+
+# Footer
+st.markdown("---")
+st.markdown("<p style='text-align:center; color:gray'>Made with ❤️ by Samia Islam Sami</p>", unsafe_allow_html=True)
