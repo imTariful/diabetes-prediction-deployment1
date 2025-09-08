@@ -1,6 +1,7 @@
 import os
 import asyncio
 import json
+import re
 import streamlit as st
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
@@ -20,7 +21,7 @@ if not API_KEY:
 
 client = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
 
-# --- Model for Coding Agent Output ---
+# --- Model for AI Coding Agent Output ---
 class CodeAgentResponse(BaseModel):
     task_description: str
     language: str
@@ -31,27 +32,46 @@ class CodeAgentResponse(BaseModel):
     best_practices: List[str] = Field(description="Tips for writing similar code in the future")
     references: List[str] = Field(description="Helpful links or documentation")
 
-# --- Async Generator ---
+# --- Safe JSON Parsing Function ---
+def safe_parse_json(raw_output: str):
+    raw_output = raw_output.strip()
+
+    # Remove ```json or ``` if present
+    if raw_output.startswith("```"):
+        raw_output = "\n".join(raw_output.split("\n")[1:-1]).strip()
+
+    if not raw_output:
+        return None  # empty response
+
+    try:
+        return json.loads(raw_output)
+    except json.JSONDecodeError:
+        # Attempt to extract JSON object using regex
+        match = re.search(r'\{.*\}', raw_output, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                return None
+        return None
+
+# --- Async Coding Agent Function ---
 async def coding_agent(task: str, language: str, mode: str = "write") -> CodeAgentResponse:
-    """
-    mode: "write" -> generate code
-          "debug" -> find errors and fix
-          "explain" -> explain code
-          "optimize" -> improve code efficiency
-    """
     prompt = f"""
-    You are Tarif's ultimate coding assistant and tutor. Your tasks include:
-    - Writing full, correct, and efficient code
-    - Explaining the code clearly step by step
-    - Debugging code, finding errors, and fixing them
-    - Suggesting optimizations and best practices
-    - Answering follow-up questions interactively
+    You are Tarif's ultimate coding assistant and tutor.
+    Tasks:
+    - Write full, correct, and efficient code
+    - Explain code step by step
+    - Debug code and fix errors
+    - Optimize code for performance
+    - Answer follow-up questions interactively
 
     Task: {task}
     Programming Language: {language}
     Mode: {mode}
 
-    Format your response as JSON with the following fields:
+    IMPORTANT: Output must be valid JSON only. Do not include extra text or markdown.
+    Format JSON fields:
     - task_description
     - language
     - code
@@ -59,74 +79,47 @@ async def coding_agent(task: str, language: str, mode: str = "write") -> CodeAge
     - debug_notes
     - optimization_suggestions
     - best_practices (3–5 points)
-    - references (2–4 links or tutorials)
+    - references (2–4 links)
     """
 
     response = await client.chat.completions.create(
         model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=2000
+        max_tokens=2500
     )
 
     raw_output = response.choices[0].message.content
+    data = safe_parse_json(raw_output)
 
-    try:
-        if raw_output.strip().startswith("```"):
-            raw_output = "\n".join(raw_output.strip().split("\n")[1:-1])
-        data = json.loads(raw_output)
-        return CodeAgentResponse(**data)
-    except (json.JSONDecodeError, ValidationError) as e:
-        st.error("Failed to parse AI response. Here is the raw output:")
+    if not data:
+        st.error("Failed to parse AI response. Raw output:")
         st.code(raw_output)
-        raise e
+        return CodeAgentResponse(
+            task_description="Error: Could not parse AI output",
+            language=language,
+            code="",
+            explanation="",
+            debug_notes="",
+            optimization_suggestions="",
+            best_practices=[],
+            references=[]
+        )
+
+    return CodeAgentResponse(**data)
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Tarif - AI Coding Agent", page_icon="🤖", layout="wide")
-st.markdown(
-    """
-    <style>
-    body {
-        background: #FDFDFD;
-        color: #1F2937;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    .stButton>button {
-        background: linear-gradient(90deg, #4ADE80, #22D3EE);
-        color: #FFFFFF;
-        font-weight: bold;
-        border-radius: 12px;
-        padding: 0.6em 1.2em;
-        box-shadow: 2px 2px 10px rgba(0,0,0,0.15);
-        transition: all 0.2s ease;
-    }
-    .stButton>button:hover {
-        transform: scale(1.05);
-    }
-    .stTextInput>div>div>input {
-        background-color: #F3F4F6;
-        color: #111827;
-        border-radius: 10px;
-        padding: 0.5em;
-        border: 1px solid #D1D5DB;
-    }
-    .stMarkdown {
-        color: #111827;
-    }
-    .card {
-        background-color: #FFFFFF;
-        padding: 1.2em;
-        margin-bottom: 1em;
-        border-radius: 15px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-        transition: transform 0.2s ease;
-    }
-    .card:hover {
-        transform: translateY(-5px);
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+st.markdown("""
+<style>
+body { background: #FDFDFD; color: #1F2937; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+.stButton>button { background: linear-gradient(90deg, #4ADE80, #22D3EE); color: #FFFFFF; font-weight: bold; border-radius: 12px; padding: 0.6em 1.2em; box-shadow: 2px 2px 10px rgba(0,0,0,0.15); transition: all 0.2s ease; }
+.stButton>button:hover { transform: scale(1.05); }
+.stTextInput>div>div>input { background-color: #F3F4F6; color: #111827; border-radius: 10px; padding: 0.5em; border: 1px solid #D1D5DB; }
+.stMarkdown { color: #111827; }
+.card { background-color: #FFFFFF; padding: 1.2em; margin-bottom: 1em; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); transition: transform 0.2s ease; }
+.card:hover { transform: translateY(-5px); }
+</style>
+""", unsafe_allow_html=True)
 
 st.markdown("## 🤖 Tarif - AI Coding Agent")
 st.markdown("Write, debug, explain, and optimize code in any programming language. Ask complex coding tasks and get interactive guidance.")
@@ -143,7 +136,7 @@ if st.button("Execute Task"):
         with st.spinner("Processing your coding task... ⏳"):
             agent_response = asyncio.run(coding_agent(task, language, mode))
 
-        # Display results in stylish cards
+        # Display results
         st.markdown(f"### 📝 Task Description")
         st.markdown(f"<div class='card'>{agent_response.task_description}</div>", unsafe_allow_html=True)
 
@@ -168,11 +161,8 @@ if st.button("Execute Task"):
             st.markdown(f"<div class='card'>- {ref}</div>", unsafe_allow_html=True)
 
 # --- Creator Credit ---
-st.markdown(
-    """
-    <div style='text-align:center; margin-top:2em; padding:1em; color:#6B7280; font-size:0.9em;'>
-        Created by <b>Tarif</b>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+st.markdown("""
+<div style='text-align:center; margin-top:2em; padding:1em; color:#6B7280; font-size:0.9em;'>
+Created by <b>Tarif</b>
+</div>
+""", unsafe_allow_html=True)
