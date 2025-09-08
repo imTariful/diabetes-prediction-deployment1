@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from typing import List
 from openai import AsyncOpenAI
-from agents import Agent, OpenAIChatCompletionsModel, Runner, set_tracing_disabled
 
 # Load environment variables
 load_dotenv()
@@ -19,7 +18,6 @@ if not API_KEY:
     st.stop()
 
 client = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
-set_tracing_disabled(disabled=True)
 
 # --- Model for Nursing Study Output ---
 class NursingNote(BaseModel):
@@ -31,33 +29,30 @@ class NursingNote(BaseModel):
     research_angle: str = Field(description="Insight on how this topic connects with healthcare research or evidence-based practice")
     further_reading: List[str] = Field(description="Suggested research papers, topics, or resources to explore")
 
-# --- Nursing Study & Research Assistant Agent ---
-nursing_assistant_agent = Agent(
-    name="Nursing Study Assistant",
-    instructions="""
+# --- Async Generator ---
+async def generate_notes(topic: str, subject: str) -> NursingNote:
+    prompt = f"""
     You are an academic and research assistant for a BSc Nursing student.  
-    Your role is to generate clear, concise, and well-structured study notes and research insights.  
 
-    Requirements:
-    - Write in simple, clear academic language
-    - Provide structured explanations (2–4 short paragraphs)
-    - Highlight key definitions, nursing procedures, or examples
-    - Provide bullet-point style 'key points' for revision
-    - Give 1 quick exam-oriented tip
-    - Show how this topic connects with research or evidence-based nursing
-    - Suggest 2–4 further reading references (topics, papers, or areas to explore)
-    """,
-    model=OpenAIChatCompletionsModel(model=MODEL_NAME, openai_client=client),
-    output_type=NursingNote,
-)
+    Write structured nursing study notes and research insights on the topic: **{topic}**
+    Subject area: {subject}
 
-# --- Async Runner ---
-async def generate_notes(topic: str, subject: str):
-    result = await Runner.run(
-        nursing_assistant_agent,
-        f"Write nursing study notes and research insights about '{topic}' in the subject {subject}."
+    Format the response as JSON with the following fields:
+    - explanation: 2–4 short paragraphs in simple, clear academic language
+    - key_points: 3–6 bullet points of important facts/definitions
+    - exam_tip: one quick exam-oriented tip
+    - research_angle: 1–2 paragraphs showing how this connects with research or evidence-based nursing
+    - further_reading: 2–4 suggestions (topics, papers, or resources)
+    """
+
+    response = await client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"}  # ensures valid JSON
     )
-    return result.final_output
+
+    raw_output = response.choices[0].message.content
+    return NursingNote.model_validate_json(raw_output)
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Nursing Study & Research Assistant", page_icon="🩺", layout="wide")
