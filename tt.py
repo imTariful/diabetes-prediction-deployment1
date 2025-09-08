@@ -145,3 +145,13 @@ if st.button("Generate Notes"):
         st.markdown(f"### 📚 Further Reading")
         for ref in veterinary_note.further_reading:
             st.markdown(f"<div class='card'>- {ref}</div>", unsafe_allow_html=True)
+
+# --- Creator Credit ---
+st.markdown(
+    """
+    <div style='text-align:center; margin-top:2em; padding:1em; color:#6B7280; font-size:0.9em;'>
+        Created by <b>Tarif</b>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
