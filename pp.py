@@ -78,7 +78,7 @@ st.markdown("""
     box-shadow: 0px 5px 15px rgba(0,0,0,0.1);
     text-align:center;
 '>
-    <h1 style='color:#333; font-family:Verdana;'>🩺 Samia Islam Sami - Nursing Assistant</h1>
+    <h1 style='color:#333; font-family:Verdana;'>🩺 Samia Islam Sami - Nursing Assistant Jarif</h1>
     <p style='color:#555; font-size:18px;'>AI-powered academic & research companion for BSc Nursing students</p>
 </div>
 """, unsafe_allow_html=True)
