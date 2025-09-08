@@ -66,67 +66,82 @@ async def generate_notes(topic: str, subject: str) -> VetNote:
         st.code(raw_output)
         raise e
 
-# --- Streamlit Dark-Themed UI ---
-st.set_page_config(page_title="Tahia's Veterinary Study Assistant", page_icon="🐾", layout="wide")
+# --- Streamlit Light-Themed Stylish UI ---
+st.set_page_config(page_title="Tahia Tamanna - Vet Study Assistant", page_icon="🐾", layout="wide")
 st.markdown(
     """
     <style>
     body {
-        background-color: #0E1117;
-        color: #FFFFFF;
+        background: #FDFDFD;
+        color: #1F2937;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
     .stButton>button {
-        background-color: #1F2937;
+        background: linear-gradient(90deg, #4ADE80, #22D3EE);
         color: #FFFFFF;
-        border-radius: 10px;
-        padding: 0.5em 1em;
+        font-weight: bold;
+        border-radius: 12px;
+        padding: 0.6em 1.2em;
+        box-shadow: 2px 2px 10px rgba(0,0,0,0.15);
+        transition: all 0.2s ease;
+    }
+    .stButton>button:hover {
+        transform: scale(1.05);
     }
     .stTextInput>div>div>input {
-        background-color: #1F2937;
-        color: #FFFFFF;
-        border-radius: 8px;
+        background-color: #F3F4F6;
+        color: #111827;
+        border-radius: 10px;
         padding: 0.5em;
+        border: 1px solid #D1D5DB;
     }
     .stMarkdown {
-        color: #E5E7EB;
+        color: #111827;
+    }
+    .card {
+        background-color: #FFFFFF;
+        padding: 1.2em;
+        margin-bottom: 1em;
+        border-radius: 15px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        transition: transform 0.2s ease;
+    }
+    .card:hover {
+        transform: translateY(-5px);
     }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-st.title("🐾 Tahia Tamanna - Veterinary Study Partner")
-st.write("Your AI companion for **Animal Husbandry & Veterinary Medicine** studies.")
+st.markdown("## 🐾 Tahia Tamanna - Veterinary Study Partner")
+st.markdown("Your AI companion for **Animal Husbandry & Veterinary Medicine** studies. Explore topics, research angles, and exam tips in a visually rich layout.")
 
 # Input fields
-topic = st.text_input("Enter your topic")
+topic = st.text_input("Enter the topic you want to study")
 subject = st.text_input("Enter the subject area")
 
 if st.button("Generate Notes"):
     if topic.strip() == "" or subject.strip() == "":
         st.warning("⚠️ Please enter both topic and subject.")
     else:
-        with st.spinner("Generating study notes... ⏳"):
+        with st.spinner("Generating advanced study notes... ⏳"):
             veterinary_note = asyncio.run(generate_notes(topic, subject))
 
-        # Display in tabs
-        tabs = st.tabs(["📖 Explanation", "🔑 Key Points", "💡 Exam Tip", "🔬 Research Angle", "📚 Further Reading"])
+        # Display in stylish cards
+        st.markdown(f"### 📖 Explanation")
+        st.markdown(f"<div class='card'>{veterinary_note.explanation}</div>", unsafe_allow_html=True)
 
-        with tabs[0]:
-            st.markdown(f"### Topic: {veterinary_note.topic}")
-            st.markdown(f"### Subject: {veterinary_note.subject}")
-            st.write(veterinary_note.explanation)
+        st.markdown(f"### 🔑 Key Points")
+        for kp in veterinary_note.key_points:
+            st.markdown(f"<div class='card'>- {kp}</div>", unsafe_allow_html=True)
 
-        with tabs[1]:
-            for kp in veterinary_note.key_points:
-                st.markdown(f"- {kp}")
+        st.markdown(f"### 💡 Exam Tip")
+        st.markdown(f"<div class='card'><b>{veterinary_note.exam_tip}</b></div>", unsafe_allow_html=True)
 
-        with tabs[2]:
-            st.info(veterinary_note.exam_tip)
+        st.markdown(f"### 🔬 Research Angle")
+        st.markdown(f"<div class='card'>{veterinary_note.research_angle}</div>", unsafe_allow_html=True)
 
-        with tabs[3]:
-            st.write(veterinary_note.research_angle)
-
-        with tabs[4]:
-            for ref in veterinary_note.further_reading:
-                st.markdown(f"- {ref}")
+        st.markdown(f"### 📚 Further Reading")
+        for ref in veterinary_note.further_reading:
+            st.markdown(f"<div class='card'>- {ref}</div>", unsafe_allow_html=True)
