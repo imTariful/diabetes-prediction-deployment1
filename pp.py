@@ -1,8 +1,9 @@
 import os
 import asyncio
+import json
 import streamlit as st
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from typing import List
 from openai import AsyncOpenAI
 
@@ -32,12 +33,14 @@ class NursingNote(BaseModel):
 # --- Async Generator ---
 async def generate_notes(topic: str, subject: str) -> NursingNote:
     prompt = f"""
-    You are an academic and research assistant for a BSc Nursing student named Samia Islam Sami.  
+    You are Samia Islam Sami, an academic and research assistant for BSc Nursing students.  
 
     Write structured nursing study notes and research insights on the topic: **{topic}**
     Subject area: {subject}
 
     Format the response as JSON with the following fields:
+    - topic
+    - subject
     - explanation: 2–4 short paragraphs in simple, clear academic language
     - key_points: 3–6 bullet points of important facts/definitions
     - exam_tip: one quick exam-oriented tip
@@ -48,25 +51,36 @@ async def generate_notes(topic: str, subject: str) -> NursingNote:
     response = await client.chat.completions.create(
         model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"}  # ensures valid JSON
+        max_tokens=1200
     )
 
     raw_output = response.choices[0].message.content
-    return NursingNote.model_validate_json(raw_output)
+
+    # Attempt to parse JSON safely
+    try:
+        # Sometimes model wraps JSON in ```json ... ```
+        if raw_output.strip().startswith("```"):
+            raw_output = "\n".join(raw_output.strip().split("\n")[1:-1])
+        data = json.loads(raw_output)
+        return NursingNote(**data)
+    except (json.JSONDecodeError, ValidationError) as e:
+        st.error("Failed to parse AI response. Here is the raw output:")
+        st.code(raw_output)
+        raise e
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="Samia's Nursing Study Assistant", page_icon="🩺", layout="wide")
-st.title("🩺 Samia Islam Sami's Nursing Study & Research Assistant")
-st.write("Your academic & research companion for **Nursing and Health Sciences**. Learn **any topic** in any subject with no limits!")
+st.set_page_config(page_title="Samia's Nursing Assistant", page_icon="🩺", layout="wide")
+st.title("🩺 Samia Islam Sami - Nursing Study & Research Assistant")
+st.write("Your academic & research companion for **Nursing and Health Sciences**.")
 
-topic = st.text_input("Enter your topic (e.g., Hypertension Management, Infection Control, Mental Health Nursing, or anything else you want to learn)")
-subject = st.text_input("Enter the subject area (e.g., Fundamentals of Nursing, Medical-Surgical Nursing, Community Health, or any subject)")
+topic = st.text_input("Enter your topic (any topic you want to learn)")
+subject = st.text_input("Enter the subject area (any subject)")
 
 if st.button("Generate Notes"):
     if topic.strip() == "" or subject.strip() == "":
-        st.warning("⚠️ Please enter both a topic and a subject.")
+        st.warning("⚠️ Please enter both topic and subject.")
     else:
-        with st.spinner("Generating study notes for Samia... ⏳"):
+        with st.spinner("Generating study notes... ⏳"):
             nursing_note = asyncio.run(generate_notes(topic, subject))
 
         # Display results
