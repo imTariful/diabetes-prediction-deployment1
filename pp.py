@@ -67,7 +67,7 @@ async def generate_notes(topic: str, subject: str) -> NursingNote:
         raise e
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="Samia's Nursing Assistant", page_icon="🩺", layout="wide")
+st.set_page_config(page_title="Samia's Nursing Assistant Jarif", page_icon="🩺", layout="wide")
 
 # --- Stylish Gradient Header ---
 st.markdown("""
@@ -178,4 +178,4 @@ if st.button("Generate Notes"):
 
 # --- Footer ---
 st.markdown("---")
-st.markdown("<p style='text-align:center; color:gray'>Made with ❤️ by Samia Islam Sami</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; color:gray'>Made with ❤️ by Tarif</p>", unsafe_allow_html=True)
