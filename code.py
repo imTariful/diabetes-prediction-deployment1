@@ -108,7 +108,7 @@ async def coding_agent(task: str, language: str, mode: str = "write") -> CodeAge
     return CodeAgentResponse(**data)
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="Tarif - AI Coding Agent", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="ByteBot - AI Coding Agent", page_icon="🤖", layout="wide")
 st.markdown("""
 <style>
 body { background: #FDFDFD; color: #1F2937; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
