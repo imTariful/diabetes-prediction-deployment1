@@ -150,7 +150,7 @@ if st.button("Generate Notes"):
 st.markdown(
     """
     <div style='text-align:center; margin-top:2em; padding:1em; color:#6B7280; font-size:0.9em;'>
-        Created by <b>Tarif</b>
+        Created with ❤️ by <b>Tarif</b>
     </div>
     """,
     unsafe_allow_html=True
