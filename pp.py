@@ -20,7 +20,7 @@ if not API_KEY:
 
 client = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
 
-# --- Model for Nursing Study Output ---
+# --- Model ---
 class NursingNote(BaseModel):
     topic: str
     subject: str
@@ -56,7 +56,6 @@ async def generate_notes(topic: str, subject: str) -> NursingNote:
 
     raw_output = response.choices[0].message.content
 
-    # Attempt to parse JSON safely
     try:
         if raw_output.strip().startswith("```"):
             raw_output = "\n".join(raw_output.strip().split("\n")[1:-1])
@@ -70,60 +69,113 @@ async def generate_notes(topic: str, subject: str) -> NursingNote:
 # --- Streamlit UI ---
 st.set_page_config(page_title="Samia's Nursing Assistant", page_icon="🩺", layout="wide")
 
-# Header
+# --- Stylish Gradient Header ---
 st.markdown("""
-    <div style='background-color:#4CAF50; padding:20px; border-radius:10px'>
-        <h1 style='color:white; text-align:center;'>🩺 Samia Islam Sami - Your Nursing Assistant</h1>
-        <p style='color:white; text-align:center; font-size:18px;'>AI-powered academic & research companion for BSc Nursing students</p>
-    </div>
+<div style='
+    background: linear-gradient(90deg, #a1c4fd, #c2e9fb);
+    padding:30px;
+    border-radius:20px;
+    box-shadow: 0px 5px 15px rgba(0,0,0,0.1);
+    text-align:center;
+'>
+    <h1 style='color:#333; font-family:Verdana;'>🩺 Samia Islam Sami - Nursing Assistant</h1>
+    <p style='color:#555; font-size:18px;'>AI-powered academic & research companion for BSc Nursing students</p>
+</div>
 """, unsafe_allow_html=True)
 
 st.markdown("---")
 
-# Input Section
+# --- Input Section ---
 with st.container():
     col1, col2 = st.columns([2, 1])
     with col1:
-        topic = st.text_input("Enter the topic you want to study")
-        subject = st.text_input("Enter the subject area")
+        topic = st.text_input("Enter the topic", placeholder="e.g., Diabetes Management")
+        subject = st.text_input("Enter the subject area", placeholder="e.g., Medical-Surgical Nursing")
     with col2:
-        st.write("⚡ Quick Tips")
-        st.markdown("- Use clear topic names")
-        st.markdown("- Examples: 'Diabetes Management', 'Cardiac Nursing', 'Infection Control'")
+        st.markdown("### ⚡ Quick Tips")
+        st.markdown("- Use clear and specific topic names")
+        st.markdown("- Example: 'Cardiac Nursing', 'Pediatric Care', 'Infection Control'")
 
+# --- Generate Notes ---
 if st.button("Generate Notes"):
     if topic.strip() == "" or subject.strip() == "":
         st.warning("⚠️ Please enter both topic and subject.")
     else:
-        with st.spinner("Generating study notes... ⏳"):
+        with st.spinner("Generating your study notes... ⏳"):
             nursing_note = asyncio.run(generate_notes(topic, subject))
 
-        # Result Section
-        st.markdown("### 📖 Your Personalized Nursing Notes")
+        # --- Result Cards ---
+        st.markdown("### 📖 Personalized Nursing Notes")
         st.success(f"**Topic:** {nursing_note.topic}  |  **Subject:** {nursing_note.subject}")
 
-        # Explanation
-        st.markdown("#### 📝 Explanation")
-        st.info(nursing_note.explanation)
+        # Explanation Card
+        st.markdown(f"""
+        <div style='
+            background: #fff9f0; 
+            padding: 20px; 
+            border-radius: 15px; 
+            box-shadow: 0px 4px 12px rgba(0,0,0,0.08);
+            margin-bottom:15px;
+        '>
+            <h3>📝 Explanation</h3>
+            <p style='color:#333'>{nursing_note.explanation}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-        # Key Points
-        st.markdown("#### 🔑 Key Points")
-        for kp in nursing_note.key_points:
-            st.markdown(f"- {kp}")
+        # Key Points Card
+        st.markdown(f"""
+        <div style='
+            background: #f0fff4; 
+            padding: 20px; 
+            border-radius: 15px; 
+            box-shadow: 0px 4px 12px rgba(0,0,0,0.08);
+            margin-bottom:15px;
+        '>
+            <h3>🔑 Key Points</h3>
+            <ul style='color:#333'>
+        """ + "".join([f"<li>{kp}</li>" for kp in nursing_note.key_points]) + "</ul></div>", unsafe_allow_html=True)
 
-        # Exam Tip
-        st.markdown("#### 💡 Exam Tip")
-        st.warning(nursing_note.exam_tip)
+        # Exam Tip Card
+        st.markdown(f"""
+        <div style='
+            background: #fff0f6; 
+            padding: 20px; 
+            border-radius: 15px; 
+            box-shadow: 0px 4px 12px rgba(0,0,0,0.08);
+            margin-bottom:15px;
+        '>
+            <h3>💡 Exam Tip</h3>
+            <p style='color:#333'>{nursing_note.exam_tip}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-        # Research Angle
-        with st.expander("🔬 Research Angle (Click to Expand)"):
-            st.write(nursing_note.research_angle)
+        # Research Angle Card
+        st.markdown(f"""
+        <div style='
+            background: #f9f0ff; 
+            padding: 20px; 
+            border-radius: 15px; 
+            box-shadow: 0px 4px 12px rgba(0,0,0,0.08);
+            margin-bottom:15px;
+        '>
+            <h3>🔬 Research Angle</h3>
+            <p style='color:#333'>{nursing_note.research_angle}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-        # Further Reading
-        with st.expander("📚 Further Reading Suggestions (Click to Expand)"):
-            for ref in nursing_note.further_reading:
-                st.markdown(f"- {ref}")
+        # Further Reading Card
+        st.markdown(f"""
+        <div style='
+            background: #f0f9ff; 
+            padding: 20px; 
+            border-radius: 15px; 
+            box-shadow: 0px 4px 12px rgba(0,0,0,0.08);
+            margin-bottom:15px;
+        '>
+            <h3>📚 Further Reading</h3>
+            <ul style='color:#333'>
+        """ + "".join([f"<li>{ref}</li>" for ref in nursing_note.further_reading]) + "</ul></div>", unsafe_allow_html=True)
 
-# Footer
+# --- Footer ---
 st.markdown("---")
 st.markdown("<p style='text-align:center; color:gray'>Made with ❤️ by Samia Islam Sami</p>", unsafe_allow_html=True)
