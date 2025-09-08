@@ -114,7 +114,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.markdown("## 🐾 Tahia Tamanna - Veterinary Study Partner")
+st.markdown("## 🐾 Tahia Tamanna - Veterinary Study Partner Jarif")
 st.markdown("Your AI companion for **Animal Husbandry & Veterinary Medicine** studies. Explore topics, research angles, and exam tips in a visually rich layout.")
 
 # Input fields
