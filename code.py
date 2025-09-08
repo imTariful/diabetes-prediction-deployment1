@@ -121,7 +121,7 @@ body { background: #FDFDFD; color: #1F2937; font-family: 'Segoe UI', Tahoma, Gen
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("## 🤖 Tarif - AI Coding Agent")
+st.markdown("## 🤖 ByteBot - AI Coding Agent")
 st.markdown("Write, debug, explain, and optimize code in any programming language. Ask complex coding tasks and get interactive guidance.")
 
 # Input fields
