@@ -32,7 +32,7 @@ class NursingNote(BaseModel):
 # --- Async Generator ---
 async def generate_notes(topic: str, subject: str) -> NursingNote:
     prompt = f"""
-    You are an academic and research assistant for a BSc Nursing student.  
+    You are an academic and research assistant for a BSc Nursing student named Samia Islam Sami.  
 
     Write structured nursing study notes and research insights on the topic: **{topic}**
     Subject area: {subject}
@@ -55,21 +55,18 @@ async def generate_notes(topic: str, subject: str) -> NursingNote:
     return NursingNote.model_validate_json(raw_output)
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="Nursing Study & Research Assistant", page_icon="🩺", layout="wide")
-st.title("🩺 BSc Nursing Study & Research Assistant")
-st.write("Your academic & research companion for **Nursing and Health Sciences**.")
+st.set_page_config(page_title="Samia's Nursing Study Assistant", page_icon="🩺", layout="wide")
+st.title("🩺 Samia Islam Sami's Nursing Study & Research Assistant")
+st.write("Your academic & research companion for **Nursing and Health Sciences**. Learn **any topic** in any subject with no limits!")
 
-topic = st.text_input("Enter your topic (e.g., Hypertension Management, Infection Control, Mental Health Nursing)")
-subject = st.selectbox(
-    "Choose Subject", 
-    ["Fundamentals of Nursing", "Medical-Surgical Nursing", "Community Health Nursing", "Obstetrics & Gynecology", "Pediatrics", "Psychiatric Nursing", "Research in Nursing"]
-)
+topic = st.text_input("Enter your topic (e.g., Hypertension Management, Infection Control, Mental Health Nursing, or anything else you want to learn)")
+subject = st.text_input("Enter the subject area (e.g., Fundamentals of Nursing, Medical-Surgical Nursing, Community Health, or any subject)")
 
 if st.button("Generate Notes"):
-    if topic.strip() == "":
-        st.warning("⚠️ Please enter a topic.")
+    if topic.strip() == "" or subject.strip() == "":
+        st.warning("⚠️ Please enter both a topic and a subject.")
     else:
-        with st.spinner("Generating study notes... ⏳"):
+        with st.spinner("Generating study notes for Samia... ⏳"):
             nursing_note = asyncio.run(generate_notes(topic, subject))
 
         # Display results
