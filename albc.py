@@ -1,227 +1,180 @@
-# app.py
 import streamlit as st
-import os
-import glob
-import cv2
-import numpy as np
-from PIL import Image
-from tqdm import tqdm
+from io import BytesIO
+import fitz  # PyMuPDF
+from pdf2image import convert_from_bytes
+import pytesseract
+import re
+import json
+import requests
+from docx import Document
 
-st.set_page_config(page_title="Thermal ↔ RGB Alignment", layout="wide")
+st.set_page_config(page_title="GLR - Insurance Auto-fill", layout="wide")
 
-st.title("Thermal ↔ RGB Alignment and Overlay")
-st.write("Automatically crop black borders from RGB, align thermal to RGB, and create overlays.")
 
-# --- Helpers ---
-def crop_black_borders_rgb(img_bgr, tol=8):
-    """
-    Detect black borders in an RGB image and crop them out.
-    tol: threshold for considering a pixel 'black' (0-255)
-    Returns cropped image and bounding box (x,y,w,h).
-    """
-    if img_bgr is None:
-        return None, (0, 0, img_bgr.shape[1], img_bgr.shape[0])
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    # mask of non-black pixels
-    mask = gray > tol
-    if mask.sum() == 0:
-        # image completely black (unexpected). return original
-        h, w = img_bgr.shape[:2]
-        return img_bgr, (0, 0, w, h)
-    coords = np.argwhere(mask)
-    y0, x0 = coords.min(axis=0)
-    y1, x1 = coords.max(axis=0) + 1  # slices are exclusive at top
-    cropped = img_bgr[y0:y1, x0:x1]
-    return cropped, (x0, y0, x1 - x0, y1 - y0)
+# ============================
+# PDF TEXT EXTRACTION
+# ============================
+def extract_text_from_pdf_bytes(pdf_bytes, ocr_lang="eng"):
+    text_parts = []
 
-def resize_to(img, target_shape):
-    """
-    Resize img to target_shape which is (height, width).
-    """
-    h, w = target_shape
-    return cv2.resize(img, (w, h), interpolation=cv2.INTER_LINEAR)
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            text_parts.append(page.get_text("text"))
+        extracted = "\n".join(text_parts).strip()
+    except:
+        extracted = ""
 
-def align_thermal_to_rgb(thermal_gray, rgb_gray, max_features=2000, good_match_percent=0.15):
-    """
-    Align thermal_gray to rgb_gray using ORB feature detection + homography.
-    Returns warped_thermal (same size as rgb_gray) and the homography matrix (or None).
-    """
-    # ORB detector
-    orb = cv2.ORB_create(nfeatures=max_features)
-    kp1, des1 = orb.detectAndCompute(thermal_gray, None)  # thermal
-    kp2, des2 = orb.detectAndCompute(rgb_gray, None)      # rgb (cropped and resized)
+    # If no text → fallback to OCR
+    if len(extracted) < 50:
+        images = convert_from_bytes(pdf_bytes)
+        ocr_texts = []
+        for img in images:
+            ocr_texts.append(pytesseract.image_to_string(img, lang=ocr_lang))
+        extracted = "\n".join(ocr_texts)
 
-    if des1 is None or des2 is None or len(kp1) < 4 or len(kp2) < 4:
-        return None, None
+    return extracted
 
-    # Match features.
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-    matches = bf.match(des1, des2)
-    # Sort by distance. Best first.
-    matches = sorted(matches, key=lambda x: x.distance)
 
-    # Keep only good matches
-    num_good = max(4, int(len(matches) * good_match_percent))
-    good_matches = matches[:num_good]
+# ============================
+# DOCX PLACEHOLDER HANDLING
+# ============================
+PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([A-Za-z0-9_\- ]+)\s*\}\}")
 
-    if len(good_matches) < 4:
-        return None, None
+def find_placeholders(doc):
+    placeholders = set()
 
-    # Extract matched keypoints
-    pts1 = np.float32([kp1[m.queryIdx].pt for m in good_matches])
-    pts2 = np.float32([kp2[m.trainIdx].pt for m in good_matches])
+    for p in doc.paragraphs:
+        for m in PLACEHOLDER_PATTERN.findall(p.text):
+            placeholders.add(m)
 
-    # Compute homography
-    H, mask = cv2.findHomography(pts1, pts2, cv2.RANSAC, 5.0)
-    return H, mask
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for m in PLACEHOLDER_PATTERN.findall(cell.text):
+                    placeholders.add(m)
 
-def apply_colormap_to_thermal(warped_thermal_gray):
-    """Map thermal grayscale to colored BGR using a colormap."""
-    normalized = cv2.normalize(warped_thermal_gray, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    colored = cv2.applyColorMap(normalized, cv2.COLORMAP_JET)  # BGR
-    return colored
+    return list(placeholders)
 
-def overlay_images(rgb_bgr, thermal_color_bgr, alpha=0.5):
-    """
-    Blend rgb_bgr and thermal_color_bgr using addWeighted.
-    Both must be same shape and BGR.
-    """
-    return cv2.addWeighted(rgb_bgr, 1 - alpha, thermal_color_bgr, alpha, 0)
 
-# --- Streamlit UI ---
-st.sidebar.header("Settings")
-input_folder = st.sidebar.text_input("Input folder (contains pairs)", value="D:/assignments/thermal_image/images")
-output_folder = st.sidebar.text_input("Output folder", value=os.path.join(input_folder, "aligned_output"))
-alpha = st.sidebar.slider("Overlay alpha (thermal)", 0.0, 1.0, 0.4, 0.05)
-tol = st.sidebar.slider("Black border tolerance (0-50)", 0, 50, 8, 1)
-good_match_percent = st.sidebar.slider("Good match percent for features", 1, 50, 15, 1) / 100.0
-max_features = st.sidebar.number_input("Max ORB features", value=2000, min_value=500, max_value=5000, step=100)
+def replace_placeholders(doc, mapping):
+    for p in doc.paragraphs:
+        if PLACEHOLDER_PATTERN.search(p.text):
+            full_text = p.text
+            for key, val in mapping.items():
+                full_text = re.sub(r"\{\{\s*" + re.escape(key) + r"\s*\}\}", val, full_text)
+            p.text = full_text
 
-st.sidebar.markdown("**Instructions**: Make sure images follow naming `XXXX_T.JPG` and `XXXX_Z.JPG`.")
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                if PLACEHOLDER_PATTERN.search(cell.text):
+                    cell_text = cell.text
+                    for key, val in mapping.items():
+                        cell_text = re.sub(r"\{\{\s*" + re.escape(key) + r"\s*\}\}", val, cell_text)
+                    cell.text = cell_text
 
-if not os.path.isdir(input_folder):
-    st.error("Input folder does not exist. Please provide a valid path.")
-else:
-    os.makedirs(output_folder, exist_ok=True)
+    return doc
 
-    if st.button("Start processing"):
-        # gather pairs
-        thermal_paths = glob.glob(os.path.join(input_folder, "*_T.JPG")) + glob.glob(os.path.join(input_folder, "*_T.jpg"))
-        processed = 0
-        failed = []
-        if not thermal_paths:
-            st.warning("No thermal images found in the input folder with suffix '_T.JPG' or '_T.jpg'.")
-        else:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            for i, tpath in enumerate(tqdm(thermal_paths, desc="Pairs")):
-                try:
-                    base = os.path.basename(tpath)
-                    # derive identifier XXXX by removing the suffix _T.JPG or _T.jpg
-                    if base.endswith("_T.JPG") or base.endswith("_T.jpg"):
-                        identifier = base[:-6]
-                    elif base.endswith("_T.JPEG") or base.endswith("_T.jpeg"):
-                        identifier = base.rsplit("_T.", 1)[0]
-                    else:
-                        identifier = base.rsplit("_T", 1)[0]
 
-                    # corresponding RGB path (try .JPG and .jpg)
-                    rgb_candidates = [
-                        os.path.join(input_folder, f"{identifier}_Z.JPG"),
-                        os.path.join(input_folder, f"{identifier}_Z.jpg"),
-                        os.path.join(input_folder, f"{identifier}_Z.JPEG"),
-                        os.path.join(input_folder, f"{identifier}_Z.jpeg"),
-                    ]
-                    rgb_path = next((p for p in rgb_candidates if os.path.exists(p)), None)
-                    if rgb_path is None:
-                        failed.append((identifier, "RGB not found"))
-                        continue
+# ============================
+# CALL OPENROUTER LLM
+# ============================
+def ask_llm(placeholders, text):
+    api_key = st.secrets["OPENROUTER_API_KEY"]
 
-                    # Read images
-                    thermal = cv2.imread(tpath, cv2.IMREAD_UNCHANGED)  # thermal image (maybe grayscale or pseudo-color)
-                    rgb = cv2.imread(rgb_path, cv2.IMREAD_COLOR)
-                    if thermal is None or rgb is None:
-                        failed.append((identifier, "read error"))
-                        continue
+    system_prompt = (
+        "You extract values for insurance report placeholders from PDF text. "
+        "Return STRICT JSON {placeholder: value}. Missing = ''. No explanation."
+    )
 
-                    # Convert thermal to grayscale if needed
-                    if len(thermal.shape) == 3:
-                        # if thermal has 3 channels, convert to gray
-                        thermal_gray_orig = cv2.cvtColor(thermal, cv2.COLOR_BGR2GRAY)
-                    else:
-                        thermal_gray_orig = thermal.copy()
+    user_prompt = (
+        "Placeholders:\n" + json.dumps(placeholders) +
+        "\n\nExtracted Text:\n" + text[:20000] +
+        "\n\nReturn JSON only."
+    )
 
-                    # 1) Preprocess & crop RGB: detect black borders and remove
-                    rgb_h, rgb_w = rgb.shape[:2]
-                    cropped_rgb, bbox = crop_black_borders_rgb(rgb, tol=tol)
-                    # Resize cropped RGB back to original full-screen size
-                    cropped_resized_rgb = resize_to(cropped_rgb, (rgb_h, rgb_w))
+    body = {
+        "model": "deepseek-r1:free",  # Free OpenRouter model
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 800,
+    }
 
-                    # Prepare grayscale versions for alignment
-                    rgb_gray_for_align = cv2.cvtColor(cropped_resized_rgb, cv2.COLOR_BGR2GRAY)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
 
-                    # 2) Align thermal image
-                    # Resize thermal to approximate the rgb size to improve matching speed if it's very different
-                    t_h, t_w = thermal_gray_orig.shape[:2]
-                    # If thermal much smaller or larger, scale to rgb size first as an initial estimate
-                    scale_factor = max(rgb_w / max(1, t_w), rgb_h / max(1, t_h))
-                    # Resize thermal to roughly the same bounding area
-                    if scale_factor != 1.0:
-                        new_tw = int(round(t_w * scale_factor))
-                        new_th = int(round(t_h * scale_factor))
-                        thermal_gray_resized = cv2.resize(thermal_gray_orig, (new_tw, new_th), interpolation=cv2.INTER_LINEAR)
-                    else:
-                        thermal_gray_resized = thermal_gray_orig.copy()
+    resp = requests.post(
+        "https://api.openrouter.ai/v1/chat/completions",
+        headers=headers,
+        json=body,
+        timeout=60,
+    )
 
-                    H, mask = align_thermal_to_rgb(
-                        thermal_gray_resized,
-                        rgb_gray_for_align,
-                        max_features=max_features,
-                        good_match_percent=good_match_percent,
-                    )
+    result = resp.json()
+    raw = result["choices"][0]["message"]["content"]
 
-                    # If homography found, warp thermal to rgb size. If not, fallback to simple resize center placement.
-                    if H is not None:
-                        # We need to warp the thermal image (which was resized) into the RGB frame.
-                        warped = cv2.warpPerspective(thermal_gray_resized, H, (rgb_w, rgb_h), flags=cv2.INTER_LINEAR)
-                    else:
-                        # fallback: scale thermal to rgb size
-                        warped = cv2.resize(thermal_gray_resized, (rgb_w, rgb_h), interpolation=cv2.INTER_LINEAR)
+    # Extract JSON
+    try:
+        parsed = json.loads(raw)
+    except:
+        m = re.search(r"\{[\s\S]*\}", raw)
+        parsed = json.loads(m.group(0)) if m else {}
 
-                    # 3) Overlay requirements
-                    thermal_color = apply_colormap_to_thermal(warped)
-                    overlay_bgr = overlay_images(cropped_resized_rgb, thermal_color, alpha=alpha)
+    # Guarantee all placeholders exist
+    return {p: parsed.get(p, "") for p in placeholders}
 
-                    # 4) Save outputs
-                    out_aligned_thermal = os.path.join(output_folder, f"{identifier}_aligned_thermal.jpg")
-                    out_overlay = os.path.join(output_folder, f"{identifier}_overlay.jpg")
-                    # Save aligned thermal as grayscale mapped to BGR (so it is a visible image)
-                    cv2.imwrite(out_aligned_thermal, thermal_color)
-                    # Save overlay (RGB remains visually same as cropped_resized_rgb plus thermal)
-                    cv2.imwrite(out_overlay, overlay_bgr)
 
-                    processed += 1
+# ============================
+# STREAMLIT UI
+# ============================
+st.title("📄 GLR Pipeline — Insurance Auto-Fill (OpenRouter LLM)")
+st.markdown("Upload a **DOCX template** and **PDF reports**. This app auto-fills the template using LLM extraction.")
 
-                    # update progress
-                    progress_bar.progress((i + 1) / len(thermal_paths))
-                    status_text.text(f"Processed: {processed}  — Last: {identifier}")
+docx_file = st.file_uploader("Upload template (.docx)", type=["docx"])
+pdf_files = st.file_uploader("Upload photo reports (.pdf)", type=["pdf"], accept_multiple_files=True)
+ocr_lang = st.text_input("OCR language (default: eng)", "eng")
 
-                except Exception as e:
-                    failed.append((tpath, str(e)))
-            progress_bar.progress(1.0)
-            st.success(f"Done. Processed {processed} pairs. Failed: {len(failed)}")
-            if failed:
-                st.write("Failures (identifier, reason):")
-                for f in failed[:20]:
-                    st.write(f"- {f[0]} : {f[1]}")
+if st.button("Generate Filled Document"):
+    if not docx_file:
+        st.error("Upload a .docx template.")
+        st.stop()
+    if not pdf_files:
+        st.error("Upload at least one PDF.")
+        st.stop()
 
-            # Show a sampling of results (first 6 overlays) in the UI
-            sample_overlays = sorted(glob.glob(os.path.join(output_folder, "*_overlay.jpg")))[:6]
-            if sample_overlays:
-                st.subheader("Sample overlays")
-                cols = st.columns(min(3, len(sample_overlays)))
-                for idx, p in enumerate(sample_overlays):
-                    with cols[idx % 3]:
-                        st.image(Image.open(p).convert("RGB"), caption=os.path.basename(p), use_column_width=True)
+    with st.spinner("Extracting PDF text..."):
+        all_text = ""
+        for pdf in pdf_files:
+            extracted = extract_text_from_pdf_bytes(pdf.read(), ocr_lang)
+            all_text += f"\n---- {pdf.name} ----\n{extracted}\n"
 
-            st.info(f"Outputs saved to: `{os.path.abspath(output_folder)}`")
+    template = Document(docx_file)
+    placeholders = find_placeholders(template)
+
+    st.info(f"Found placeholders: {placeholders}")
+
+    with st.spinner("Asking LLM to fill fields..."):
+        mapping = ask_llm(placeholders, all_text)
+
+    st.success("LLM extracted the field values.")
+    st.json(mapping)
+
+    filled_doc = replace_placeholders(template, mapping)
+
+    buffer = BytesIO()
+    filled_doc.save(buffer)
+    buffer.seek(0)
+
+    st.download_button(
+        "Download Filled Template",
+        buffer,
+        "filled_template.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
