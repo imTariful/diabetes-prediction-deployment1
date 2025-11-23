@@ -31,9 +31,10 @@ pillow==11.1.0
 
 
 streamlit
-opencv-python
+opencv-python-headless
 numpy
 Pillow
 tqdm
+
 
 
