@@ -122,7 +122,7 @@ The AI will extract data and fill the template.
 
 # --- API Keys ---
 gemini_key = "AIzaSyDKeXrfDtNTkCCPznA1Uru6_c9tJk7Z1_Q"
-openrouter_key = "sk-84bb25b1dfef4912b194137ee978ae84"
+openrouter_key = "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"
 
 docx_file = st.file_uploader("Upload Insurance Template (.docx)", type=['docx'])
 pdf_file = st.file_uploader("Upload PDF Photo Report (.pdf)", type=['pdf'])
