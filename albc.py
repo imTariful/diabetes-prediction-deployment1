@@ -48,9 +48,9 @@ def extract_text_from_docx_for_context(docx_file):
                 
     return "\n".join(full_text)
 
-def query_gemini(api_key, system_prompt, user_prompt):
+def query_gemini_flash(api_key, system_prompt, user_prompt):
     """
-    Query Google Gemini (via PaLM API) and return JSON-compatible string
+    Query Google Gemini 1.5 Flash model via PaLM API
     """
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -62,13 +62,13 @@ def query_gemini(api_key, system_prompt, user_prompt):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "model": "gemini-1.5-turbo",  # change if you have access to a different Gemini model
+        "model": "gemini-1.5-flash",  # Gemini 1.5 Flash model
         "temperature": 0
     }
     
     try:
         response = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta2/models/gemini-1.5:generateMessage",
+            "https://generativelanguage.googleapis.com/v1beta2/models/gemini-1.5-flash:generateMessage",
             headers=headers,
             json=payload
         )
@@ -114,10 +114,8 @@ This tool automates the filling of insurance templates.
 """)
 
 # --- Gemini API Key ---
-# Replace below with your real Gemini API Key
-api_key = "AIzaSyCzhgy8y8dgPVtjsJp8xoTBcciow80uDtA"
+api_key = "AIzaSyDKeXrfDtNTkCCPznA1Uru6_c9tJk7Z1_Q"
 
-# Optional sidebar override
 with st.sidebar:
     typed_key = st.text_input("Gemini API Key (optional)", type="password")
     if typed_key:
@@ -150,7 +148,7 @@ if st.button("🚀 Process and Fill Template", type="primary"):
             st.write("📖 Analyzing template structure...")
             template_text = extract_text_from_docx_for_context(docx_file)
             
-            st.write("🤖 Querying Gemini LLM to map data...")
+            st.write("🤖 Querying Gemini 1.5 Flash LLM to map data...")
             system_prompt = """
             You are an expert insurance adjuster AI. Extract information from inspection reports (PDFs) and map them to fields in an insurance template.
             Return JSON. Use exact field names from template. Missing info -> "N/A".
@@ -166,7 +164,7 @@ if st.button("🚀 Process and Fill Template", type="primary"):
             Output JSON:
             """
             
-            llm_response = query_gemini(api_key, system_prompt, user_prompt)
+            llm_response = query_gemini_flash(api_key, system_prompt, user_prompt)
             
             if llm_response:
                 try:
