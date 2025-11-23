@@ -31,10 +31,15 @@ pillow==11.1.0
 
 
 streamlit
-opencv-python-headless
-numpy
+python-docx
+pymupdf
+pdf2image
+pytesseract
+requests
 Pillow
-tqdm
+poppler-utils
+
+
 
 
 
