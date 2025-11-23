@@ -2,162 +2,209 @@ import streamlit as st
 import google.generativeai as genai
 from docx import Document
 import io
-import re
 import json
+import re
 import tempfile
 import os
 import mimetypes
+from datetime import datetime
 
-# --- Page Setup ---
-st.set_page_config(page_title="Smart Universal Doc Filler", layout="wide")
-st.title("🧠 Smart Universal Document Filler")
+# --- Page Config ---
+st.set_page_config(page_title="Universal AI Document Filler", layout="wide", page_icon="🧠")
+st.title("🧠 Universal AI Document Filler")
 st.markdown("""
-**How this works for ANY file:**
-1. The App reads your Template and finds placeholders like `[DATE_LOSS]`.
-2. It sends your PDF/Images to Google Gemini.
-3. **The "Smart" Step:** It asks Gemini to use reasoning to find the matching data. 
-   *(e.g., matching "[DATE_LOSS]" to "DOL" or "Date of Incident" in the source).*
+**No rules. No fixed fields. Just intelligence.**
+
+Upload **any template** (.docx) with placeholders like `[Date]`, `[Client Name]`, `[Damage Description]`, etc.  
+Then upload **any source files** — PDFs, photos, scans, handwritten forms, screenshots...  
+The AI will **understand everything** and fill your template perfectly.
 """)
 
 # --- Sidebar ---
 with st.sidebar:
-    st.header("Configuration")
-    api_key = st.text_input("Gemini API Key", type="password")
-    model_choice = st.selectbox("Model Strength", ["gemini-2.5-flash", "gemini-2.5-pro"])
-    st.caption("Use 'Pro' if your documents have very complex handwriting or tables.")
+    st.header("Gemini Configuration")
+    api_key = st.text_input("Gemini API Key", type="password", help="Get free key: https://aistudio.google.com/app/apikey")
+    model_choice = st.selectbox(
+        "Model (Pro = better handwriting & reasoning)",
+        ["gemini-2.5-flash", "gemini-2.5-pro"],
+        index=1
+    )
+    st.info("Use **Pro** for handwritten, damaged, or complex forms")
 
-# --- File Uploads ---
+# --- Uploads ---
 col1, col2 = st.columns(2)
 with col1:
-    template_file = st.file_uploader("1. Upload Template (.docx)", type="docx")
+    template_file = st.file_uploader("1. Template (.docx with [placeholders])", type="docx")
 with col2:
-    source_files = st.file_uploader("2. Upload Source (PDF/Images)", accept_multiple_files=True)
+    source_files = st.file_uploader("2. Source Files (PDF, Images, Photos...)", accept_multiple_files=True, type=["pdf", "png", "jpg", "jpeg", "tiff", "bmp", "heic"])
 
-# --- Logic ---
-if st.button("Generate Document", type="primary"):
+if st.button("🚀 Fill Document with AI", type="primary"):
     if not api_key or not template_file or not source_files:
-        st.error("Please provide API Key, Template, and Source Files.")
+        st.error("Please provide API key, template, and source files.")
         st.stop()
 
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(model_choice)
 
-    with st.spinner("Analyzing Template structure..."):
-        # 1. Extract Placeholders from Word Doc
-        doc = Document(template_file)
-        placeholders = set()
-        # Find all text inside brackets: [ANY_TEXT_HERE]
-        regex = r'\[([A-Z0-9_ -]+)\]'
+    progress = st.progress(0)
+    status = st.empty()
+
+    # Step 1: Extract placeholders
+    status.text("Reading template placeholders...")
+    doc = Document(template_file)
+    placeholder_pattern = r'\[([^\]]+)\]'
+    placeholders = set()
+
+    for paragraph in doc.paragraphs:
+        placeholders.update(re.findall(placeholder_pattern, paragraph.text))
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    placeholders.update(re.findall(placeholder_pattern, paragraph.text))
+
+    placeholders = [p.strip() for p in placeholders if p.strip()]
+    
+    if not placeholders:
+        st.warning("No placeholders found! Use format like [Client Name], [Date of Birth], etc.")
+        st.stop()
+
+    progress.progress(20)
+    status.text(f"Found {len(placeholders)} fields: {', '.join(placeholders[:10])}{'...' if len(placeholders)>10 else ''}")
+
+    # Step 2: Upload files to Gemini
+    status.text("Uploading source files to AI...")
+    gemini_files = []
+    for file in source_files:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
+            tmp.write(file.getvalue())
+            tmp_path = tmp.name
+
+        mime_type, _ = mimetypes.guess_type(tmp_path)
+        if mime_type is None:
+            mime_type = "application/pdf" if tmp_path.lower().endswith(".pdf") else "image/jpeg"
+
+        g_file = genai.upload_file(tmp_path, mime_type=mime_type)
+        gemini_files.append(g_file)
+        os.unlink(tmp_path)
+
+    progress.progress(50)
+
+    # THE ULTIMATE PROMPT (This is where the magic happens)
+    prompt = f"""
+You are an expert forensic document analyst and data extraction specialist.
+
+Your mission: Extract **every piece of meaningful information** from the attached source documents (PDFs, photos, scans, forms, handwritten notes, etc.) and map it intelligently to the template fields.
+
+Template fields to fill:
+{json.dumps(placeholders, indent=2)}
+
+RULES:
+1. **Semantic Matching** — The source may use different wording:
+   - [Client Name] → could be "Insured", "Policyholder", "Applicant", "Mr. John Doe"
+   - [Date of Loss] → "Incident Date", "DOL", "Loss Occurred", "03/15/2024"
+   - [Address] → street, city, ZIP from anywhere
+   - [Vehicle Make] → "Toyota", "Ford F-150", etc.
+
+2. **Extract Everything Useful** — Even if not directly asked, include:
+   - Names (people, companies, adjusters)
+   - Dates (any format)
+   - Addresses
+   - Phone numbers, emails
+   - Claim/Policy/File numbers
+   - Damage descriptions
+   - Amounts (estimates, deductibles)
+   - Vehicle details (make, model, year, VIN, plate)
+
+3. **Be Smart About Context**:
+   - If a photo shows a roof with hail damage → fill [Damage Type] = "Hail"
+   - If handwritten note says "windstorm 10/5/24" → [Date of Loss] = "10/05/2024", [Cause] = "Windstorm"
+
+4. If a field is truly missing → use "Not Found"
+5. If multiple values → pick the most official/relevant one
+
+Return ONLY a clean JSON object with exact placeholder names as keys.
+
+Example:
+{{
+  "Client Name": "Sarah Johnson",
+  "Date of Loss": "10/15/2024",
+  "Damage Description": "Hail dents on roof and hood",
+  "Claim Number": "CLM-2024-8871",
+  "Not Found Example": "Not Found"
+}}
+"""
+
+    status.text("AI is analyzing all documents deeply... (this may take 20–90 seconds)")
+    progress.progress(70)
+
+    try:
+        response = model.generate_content(
+            [prompt] + gemini_files,
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                temperature=0.0
+            )
+        )
+
+        # Clean response
+        raw = response.text.strip()
+        if "```" in raw:
+            raw = re.search(r"\{.*\}", raw, re.DOTALL)
+            raw = raw.group(0) if raw else response.text
+
+        data = json.loads(raw)
+
+        progress.progress(90)
+        status.text("Filling document...")
+
+        # Smart replacement (preserves formatting)
+        def replace_in_paragraph(paragraph, key, value):
+            placeholder = f"[{key}]"
+            if placeholder in paragraph.text:
+                for run in paragraph.runs:
+                    if placeholder in run.text:
+                        run.text = run.text.replace(placeholder, str(value))
 
         for p in doc.paragraphs:
-            placeholders.update(re.findall(regex, p.text))
+            for key, val in data.items():
+                replace_in_paragraph(p, key, val)
+
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for p in cell.paragraphs:
-                        placeholders.update(re.findall(regex, p.text))
-        
-        fields = list(placeholders)
-        if not fields:
-            st.warning("No placeholders found! Use format [PLACEHOLDER] in your Word doc.")
-            st.stop()
-            
-        with st.expander(f"Found {len(fields)} Target Fields"):
-            st.write(fields)
+                        for key, val in data.items():
+                            replace_in_paragraph(p, key, val)
 
-    with st.spinner("Reading Source Files & Extracting Data..."):
-        # 2. Upload Source Files to Gemini
-        gemini_files = []
-        for file in source_files:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
-                tmp.write(file.getvalue())
-                tmp_path = tmp.name
-            
-            # Determine MIME type
-            mime_type, _ = mimetypes.guess_type(tmp_path)
-            if mime_type is None: mime_type = "application/pdf"
-            
-            g_file = genai.upload_file(tmp_path, mime_type=mime_type)
-            gemini_files.append(g_file)
-            os.remove(tmp_path)
+        # Save and offer download
+        bio = io.BytesIO()
+        doc.save(bio)
+        bio.seek(0)
 
-        # 3. The "Context-Aware" Prompt
-        # This is the key difference. We tell AI to infer meanings.
-        prompt = f"""
-        You are an intelligent data extraction assistant.
-        
-        I have a document template with the following placeholders:
-        {json.dumps(fields)}
+        progress.progress(100)
+        status.text("Done! Download your filled document")
 
-        Your Job:
-        1. Analyze the attached source documents (images/PDFs).
-        2. For each placeholder in the list, find the corresponding data in the source documents.
-        3. **Use Reasoning:** - If the placeholder is [DATE_LOSS], look for "Date of Loss", "DOL", or "Incident Date".
-           - If the placeholder is [INSURED_NAME], look for "Insured", "Client", or "Policyholder".
-           - If the placeholder is [ROOF_MAT], look for roof details like "3-tab shingles".
-        4. Extract the exact value found.
-        5. If data is absolutely missing, return "Not Specified".
-        
-        Return the result as a raw JSON object: {{ "PLACEHOLDER_NAME": "Extracted Value" }}
-        """
+        st.success("Document filled perfectly!")
+        st.json(data, expanded=False)
 
-        try:
-            response = model.generate_content(
-                [prompt] + gemini_files,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json",
-                    temperature=0.0
-                )
-            )
-            
-            # Clean and Parse JSON
-            text_resp = response.text.strip()
-            if text_resp.startswith("```json"): text_resp = text_resp[7:-3]
-            data = json.loads(text_resp)
-            
-            st.success("Data Extracted! Review below:")
-            st.json(data)
+        st.download_button(
+            label="📥 Download Filled Document",
+            data=bio,
+            file_name=f"Filled_{template_file.name.replace('.docx', '')}_{datetime.now().strftime('%Y%m%d')}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            type="primary"
+        )
 
-            # 4. Fill the Document
-            def replace_text(text, data_dict):
-                for key, val in data_dict.items():
-                    # Check for [KEY]
-                    placeholder_str = f"[{key}]"
-                    if placeholder_str in text:
-                        # Replace, ensuring it's a string
-                        text = text.replace(placeholder_str, str(val))
-                return text
+    except Exception as e:
+        st.error(f"Error: {e}")
+        if "response.text" in locals():
+            st.code(response.text)
 
-            # Paragraphs
-            for p in doc.paragraphs:
-                if "[" in p.text:
-                    p.text = replace_text(p.text, data)
-            
-            # Tables
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for p in cell.paragraphs:
-                            if "[" in p.text:
-                                p.text = replace_text(p.text, data)
-
-            # 5. Download
-            bio = io.BytesIO()
-            doc.save(bio)
-            bio.seek(0)
-            
-            st.download_button(
-                label="📥 Download Completed Report",
-                data=bio,
-                file_name="Filled_Universal_Report.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                type="primary"
-            )
-
-        except Exception as e:
-            st.error(f"AI Error: {e}")
-        
-        finally:
-            for f in gemini_files:
-                try: genai.delete_file(f.name)
-                except: pass
+    finally:
+        # Cleanup
+        for f in gemini_files:
+            try:
+                genai.delete_file(f.name)
+            except:
+                pass
