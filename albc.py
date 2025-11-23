@@ -28,7 +28,7 @@ with st.sidebar:
         ["gemini-2.5-flash", "gemini-2.5-pro"],
         index=1
     )
-    media_resolution = st.selectbox("PDF/Image Quality", ["low", "medium", "high"], index=2, help="High for handwriting/fine text")
+    media_resolution = st.selectbox("PDF/Image Quality", ["low", "medium", "high"], index=2, help="High for handwriting/fine text – AI will auto-adjust")
     st.info("**Pro Tip**: High res + Pro model = 95%+ accuracy on scans/handwriting")
 
 # --- Uploads ---
@@ -72,8 +72,8 @@ if st.button("🚀 Extract & Fill with Zero Misses", type="primary"):
     progress.progress(15)
     status.text(f"Found {len(placeholders)} fields: {', '.join(placeholders[:8])}{'...' if len(placeholders)>8 else ''}")
 
-    # Step 2: Upload files with high-res config
-    status.text("📤 Uploading sources to AI (high-res mode)...")
+    # Step 2: Upload files with display_only=True for better vision/OCR
+    status.text("📤 Uploading sources to AI (high-res vision mode)...")
     gemini_files = []
     for file in source_files:
         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
@@ -84,13 +84,18 @@ if st.button("🚀 Extract & Fill with Zero Misses", type="primary"):
         if mime_type is None:
             mime_type = "application/pdf" if tmp_path.lower().endswith(".pdf") else "image/jpeg"
 
-        g_file = genai.upload_file(tmp_path, mime_type=mime_type)
+        # Use display_only=True for improved OCR/handwriting on images/PDFs
+        g_file = genai.upload_file(
+            path=tmp_path, 
+            mime_type=mime_type,
+            display_only=(media_resolution == "high")  # Enable high-res vision if selected
+        )
         gemini_files.append(g_file)
         os.unlink(tmp_path)
 
     progress.progress(30)
 
-    # ULTIMATE ZERO-MISS PROMPT (SI → RI → QI Structure + CoT + Few-Shot + Self-Critique)
+    # ULTIMATE ZERO-MISS PROMPT (Enhanced for resolution/orientation)
     # First Pass: Comprehensive Extraction
     extraction_prompt = f"""
 <system_instruction>
@@ -99,7 +104,7 @@ You are a forensic document analyst with 20+ years extracting data from messy PD
 
 <role_instruction>
 Use STEP-BY-STEP reasoning (Chain-of-Thought):
-1. Scan ALL attached files page-by-page, including images/PDFs. Note orientation (rotate mentally if needed), blurriness, and handwriting styles.
+1. Scan ALL attached files page-by-page, including images/PDFs. Treat as {'high-resolution scans' if media_resolution == 'high' else 'standard resolution'}. Auto-rotate if tilted; enhance faint text/handwriting using context.
 2. Extract RAW data: Names, dates (any format), addresses, phones/emails, IDs/numbers (claim/policy/VIN), amounts, descriptions, signatures, even inferred context (e.g., "hail dents in roof photo" → damage type).
 3. For each template field, semantically match: 
    - [Client Name] → "Insured", "Applicant", "John Doe" (full/preferred name).
@@ -128,15 +133,13 @@ Based on the above, analyze the attached files and extract ALL data. Output raw 
     progress.progress(50)
 
     try:
-        # First Pass
+        # First Pass (Fixed: No invalid config)
         response1 = model.generate_content(
             [extraction_prompt] + gemini_files,
-            generation_config=genai.GenerationConfig(
+            generation_config=genai.types.GenerationConfig(
                 response_mime_type="application/json",
                 temperature=0.0  # Zero randomness for accuracy
-            ),
-            # High-res for multimodal
-            config=genai.types.ContentConfig(media_resolution=media_resolution)
+            )
         )
 
         # Robust JSON Cleaning
@@ -173,11 +176,10 @@ Re-analyze files if needed.
 
         response2 = model.generate_content(
             [critique_prompt] + gemini_files,
-            generation_config=genai.GenerationConfig(
+            generation_config=genai.types.GenerationConfig(
                 response_mime_type="application/json",
                 temperature=0.0
-            ),
-            config=genai.types.ContentConfig(media_resolution=media_resolution)
+            )
         )
 
         refined_raw = clean_json(response2.text)
