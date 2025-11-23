@@ -1,173 +1,127 @@
+# insurance_filler_gemini.py
 import streamlit as st
-import io
-import json
-import requests
+import google.generativeai as genai
 from docx import Document
-from PyPDF2 import PdfReader
+import io
+import re
+import json
 
-# --- CONFIGURATION ---
-st.set_page_config(
-    page_title="GLR Insurance Pipeline",
-    page_icon="📋",
-    layout="wide"
+# --- Page Config ---
+st.set_page_config(page_title="Insurance Auto-Filler", layout="centered")
+st.title("Insurance Template Auto-Filler")
+st.markdown("### Powered by Gemini 1.5 Flash (free & super fast)")
+
+# --- Hardcoded API key (for your personal use only!) ---
+GEMINI_API_KEY = "AIzaSyDKeXrfDtNTkCCPznA1Uru6_c9tJk7Z1_Q"
+
+# Optional: let user override if they want
+gemini_api_key = st.text_input(
+    "Gemini API Key (already filled for you)",
+    value=GEMINI_API_KEY,
+    type="password"
 )
 
-# --- HELPER FUNCTIONS ---
+template_file = st.file_uploader("Upload Insurance Template (.docx)", type="docx")
+pdf_files = st.file_uploader("Upload Photo Report(s) (.pdf)", type="pdf", accept_multiple_files=True)
 
-def extract_text_from_pdf(pdf_file):
-    """Extracts text from a single PDF file."""
-    try:
-        reader = PdfReader(pdf_file)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() + "\n"
-        return text
-    except Exception as e:
-        st.error(f"Error reading {pdf_file.name}: {e}")
-        return ""
+if st.button("Generate Filled Document", type="primary"):
+    if not template_file or not pdf_files:
+        st.error("Please upload both the .docx template and at least one PDF report.")
+        st.stop()
 
-def extract_text_from_docx_for_context(docx_file):
-    doc = Document(docx_file)
-    full_text = []
-    for para in doc.paragraphs:
-        if para.text.strip():
-            full_text.append(para.text)
-    for table in doc.tables:
-        for row in table.rows:
-            row_text = [cell.text for cell in row.cells if cell.text.strip()]
-            if row_text:
-                full_text.append(" | ".join(row_text))
-    return "\n".join(full_text)
+    genai.configure(api_key=gemini_api_key)
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
-def query_gemini_flash(api_key, system_prompt, user_prompt):
-    """Query Google Gemini 1.5 Flash model"""
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "prompt": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "model": "gemini-1.5-flash",
-        "temperature": 0
-    }
-    try:
-        response = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.5-flash:generateMessage",
-            headers=headers,
-            json=payload
-        )
-        response.raise_for_status()
-        return response.json()["candidates"][0]["content"]
-    except Exception as e:
-        st.warning("Gemini API failed, trying OpenRouter fallback...")
-        return None
+    with st.spinner("Gemini is reading your PDFs and filling the template..."):
+        # 1. Find all {placeholders} in the docx
+        doc = Document(template_file)
+        placeholders = set()
+        for p in doc.paragraphs:
+            placeholders.update(re.findall(r'\{([^}]+)\}', p.text))
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    placeholders.update(re.findall(r'\{([^}]+)\}', cell.text))
 
-def query_openrouter(api_key, system_prompt, user_prompt):
-    """Fallback LLM using OpenRouter"""
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "deepseek/deepseek-chat",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "response_format": {"type": "json_object"}
-    }
-    try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=payload
-        )
-        response.raise_for_status()
-        return response.json()['choices'][0]['message']['content']
-    except Exception as e:
-        st.error(f"OpenRouter API failed: {e}")
-        return None
+        placeholder_list = list(placeholders)
+        st.info(f"Found fields → `{'`, `'.join(placeholder_list)}`")
 
-def fill_docx_template(original_docx, data_mapping):
-    doc = Document(original_docx)
-    def replace_text_in_paragraph(paragraph, mapping):
-        for key, value in mapping.items():
-            if key in paragraph.text:
-                if "{{" in key:
-                    paragraph.text = paragraph.text.replace(key, str(value))
-                else:
-                    if str(value) not in paragraph.text:
-                        paragraph.text = paragraph.text.replace(key, f"{key} {value}")
-    for para in doc.paragraphs:
-        replace_text_in_paragraph(para, data_mapping)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for para in cell.paragraphs:
-                    replace_text_in_paragraph(para, data_mapping)
-    target_stream = io.BytesIO()
-    doc.save(target_stream)
-    target_stream.seek(0)
-    return target_stream
+        # 2. Upload PDFs to Gemini
+        uploaded_pdfs = []
+        for pdf_file in pdf_files:
+            uploaded = genai.upload_file(io.BytesIO(pdf_file.getvalue()), display_name=pdf_file.name)
+            uploaded_pdfs.append(uploaded)
 
-# --- MAIN UI ---
-st.title("📄 GLR Pipeline: Automated Insurance Reporting")
-st.markdown("""
-Upload **one DOCX template** and **one PDF report**.  
-The AI will extract data and fill the template.
-""")
+        # 3. Ask Gemini to extract exactly these fields
+        prompt = f"""
+You are an expert insurance processor.
+Extract ONLY these fields from the attached photo report(s):
 
-# --- API Keys ---
-gemini_key = "AIzaSyDKeXrfDtNTkCCPznA1Uru6_c9tJk7Z1_Q"
-openrouter_key = "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"
+{', '.join(placeholder_list)}
 
-docx_file = st.file_uploader("Upload Insurance Template (.docx)", type=['docx'])
-pdf_file = st.file_uploader("Upload PDF Photo Report (.pdf)", type=['pdf'])
+Return pure JSON (nothing else, no markdown):
+{{"field_name": "exact value or Not found", ...}}
+"""
 
-if st.button("🚀 Process and Fill Template"):
-    if not docx_file or not pdf_file:
-        st.warning("Please upload both a DOCX template and a PDF report.")
-    else:
-        st.spinner("Processing pipeline...")
-        pdf_text = extract_text_from_pdf(pdf_file)
-        template_text = extract_text_from_docx_for_context(docx_file)
-
-        system_prompt = """
-        You are an expert insurance adjuster AI. Extract info from PDF and map to template fields. Return JSON.
-        Use exact field names. Missing info -> "N/A".
-        """
-        user_prompt = f"""
-        --- TEMPLATE CONTENT ---
-        {template_text[:2000]} ...
-        
-        --- REPORT CONTENT ---
-        {pdf_text[:6000]} ...
-        
-        Output JSON:
-        """
-
-        llm_response = query_gemini_flash(gemini_key, system_prompt, user_prompt)
-        if not llm_response:
-            llm_response = query_openrouter(openrouter_key, system_prompt, user_prompt)
-
-        if llm_response:
-            try:
-                clean_json = llm_response.replace("```json", "").replace("```", "").strip()
-                mapping_data = json.loads(clean_json)
-                st.json(mapping_data, expanded=False)
-                filled_docx = fill_docx_template(docx_file, mapping_data)
-                st.success("Document generated successfully!")
-                st.download_button(
-                    label="📥 Download Filled Report (.docx)",
-                    data=filled_docx,
-                    file_name="Filled_Insurance_Report.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        try:
+            response = model.generate_content(
+                [prompt] + uploaded_pdfs,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1
                 )
-            except json.JSONDecodeError:
-                st.error("Failed to parse LLM response as JSON.")
-                st.text(llm_response)
-        else:
-            st.error("Failed to get response from both Gemini and OpenRouter.")
+            )
+
+            raw_json = response.text.strip().strip("```json").strip("```")
+            data = json.loads(raw_json)
+            st.success("Data extracted successfully!")
+            st.json(data)
+
+        except Exception as e:
+            st.error(f"Gemini error: {e}")
+            st.info("Common fix: wait 1–2 minutes (free tier rate limit) or try fewer/lighter PDFs.")
+            st.stop()
+
+        # 4. Replace placeholders in the document
+        replaced = 0
+        for field, value in data.items():
+            placeholder = f"{{{field}}}"
+            value = str(value) if value != "Not found" else "N/A"
+
+            # Paragraphs
+            for para in doc.paragraphs:
+                if placeholder in para.text:
+                    para.text = para.text.replace(placeholder, value)
+                    replaced += 1
+
+            # Tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        if placeholder in cell.text:
+                            cell.text = cell.text.replace(placeholder, value)
+                            replaced += 1
+
+        st.success(f"Done! Replaced {replaced} fields.")
+
+        # 5. Download
+        output = io.BytesIO()
+        doc.save(output)
+        output.seek(0)
+
+        st.download_button(
+            label="Download Filled Template.docx",
+            data=output.getvalue(),
+            file_name="Filled_Insurance_Report.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+        # Cleanup uploaded files
+        for f in uploaded_pdfs:
+            try:
+                genai.delete_file(f.name)
+            except:
+                pass
+
+st.markdown("---")
+st.markdown("**Tip:** Use clear placeholders in your .docx like `{claim_number}`, `{plate_number}`, `{damage_date}`, `{total_cost}`")
