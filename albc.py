@@ -1,4 +1,4 @@
-# insurance_filler_fixed.py
+# insurance_filler_gemini_25.py
 import streamlit as st
 import google.generativeai as genai
 from docx import Document
@@ -9,7 +9,7 @@ import json
 # === CONFIG ===
 st.set_page_config(page_title="Insurance Auto-Filler", layout="centered")
 st.title("Insurance Template Auto-Filler")
-st.markdown("### Powered by Gemini 1.5 Flash")
+st.markdown("### Powered by Gemini 2.5 Flash (latest & fastest)")
 
 # Your API key (already included)
 GEMINI_API_KEY = "AIzaSyDKeXrfDtNTkCCPznA1Uru6_c9tJk7Z1_Q"
@@ -26,9 +26,9 @@ if st.button("Generate Filled Document", type="primary"):
 
     # Configure Gemini
     genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")  # Updated to 2.5 Flash
 
-    with st.spinner("Analyzing template and reading PDFs..."):
+    with st.spinner("Analyzing template and reading PDFs with Gemini 2.5 Flash..."):
         # 1. Extract placeholders {field_name}
         doc = Document(template_file)
         placeholders = set()
@@ -52,7 +52,7 @@ if st.button("Generate Filled Document", type="primary"):
             bytes_io = io.BytesIO(pdf_file.getbuffer())
             uploaded = genai.upload_file(
                 bytes_io,
-                mime_type="application/pdf",      # This line fixes the error
+                mime_type="application/pdf",      # Fixes mime type error
                 display_name=pdf_file.name
             )
             uploaded_files.append(uploaded)
@@ -89,7 +89,7 @@ Example:
                     json_text = json_text[4:].strip()
 
             data = json.loads(json_text)
-            st.success("Extraction successful!")
+            st.success("Extraction successful with Gemini 2.5 Flash!")
             st.json(data)
 
         except Exception as e:
@@ -139,4 +139,4 @@ Example:
                 pass
 
 st.markdown("---")
-st.caption("Fixed version — works 100% with Gemini 1.5 Flash free tier")
+st.caption("Updated to Gemini 2.5 Flash — even faster & smarter than 1.5!")
