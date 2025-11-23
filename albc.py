@@ -48,31 +48,32 @@ def extract_text_from_docx_for_context(docx_file):
                 
     return "\n".join(full_text)
 
-def query_openrouter(api_key, system_prompt, user_prompt):
+def query_gemini(api_key, system_prompt, user_prompt):
+    """
+    Query Google Gemini (via PaLM API) and return JSON-compatible string
+    """
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "HTTP-Referer": "http://localhost:8501",
-        "X-Title": "GLR Pipeline App",
         "Content-Type": "application/json"
     }
     
     payload = {
-        "model": "deepseek/deepseek-chat",
-        "messages": [
+        "prompt": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "response_format": {"type": "json_object"}
+        "model": "gemini-1.5-turbo",  # change if you have access to a different Gemini model
+        "temperature": 0
     }
     
     try:
         response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
+            "https://generativelanguage.googleapis.com/v1beta2/models/gemini-1.5:generateMessage",
             headers=headers,
-            data=json.dumps(payload)
+            json=payload
         )
         response.raise_for_status()
-        return response.json()['choices'][0]['message']['content']
+        return response.json()["candidates"][0]["content"]
     except Exception as e:
         st.error(f"LLM API Error: {str(e)}")
         return None
@@ -112,10 +113,18 @@ This tool automates the filling of insurance templates.
 3. The AI extracts data and fills the document.
 """)
 
-# --- Hardcoded OpenRouter API Key ---
-api_key = "sk-4e7f07f783074bef9506f43831656335"  
-if not api_key or api_key == "YOUR_OPENROUTER_API_KEY_HERE":
-    st.warning("Please set your OpenRouter API key in the code to use the LLM.")
+# --- Gemini API Key ---
+# Replace below with your real Gemini API Key
+api_key = "AIzaSyCzhgy8y8dgPVtjsJp8xoTBcciow80uDtA"
+
+# Optional sidebar override
+with st.sidebar:
+    typed_key = st.text_input("Gemini API Key (optional)", type="password")
+    if typed_key:
+        api_key = typed_key
+
+if not api_key or api_key == "YOUR_GEMINI_API_KEY_HERE":
+    st.warning("Please set your Gemini API key in the code or sidebar.")
 
 # File Uploaders
 col1, col2 = st.columns(2)
@@ -126,8 +135,8 @@ with col2:
 
 # Processing Logic
 if st.button("🚀 Process and Fill Template", type="primary"):
-    if not api_key or api_key == "YOUR_OPENROUTER_API_KEY_HERE":
-        st.warning("OpenRouter API key is missing or invalid.")
+    if not api_key or api_key == "YOUR_GEMINI_API_KEY_HERE":
+        st.warning("Gemini API key is missing or invalid.")
     elif not docx_file or not pdf_files:
         st.warning("Please upload both a template and at least one PDF report.")
     else:
@@ -135,14 +144,13 @@ if st.button("🚀 Process and Fill Template", type="primary"):
             st.write("🔍 Extracting text from PDF reports...")
             pdf_text = extract_text_from_pdfs(pdf_files)
             
-            # Collapsible view of extracted PDF text
             with st.expander("View Extracted PDF Text"):
                 st.text_area("PDF Content", pdf_text, height=300)
             
             st.write("📖 Analyzing template structure...")
             template_text = extract_text_from_docx_for_context(docx_file)
             
-            st.write("🤖 Querying LLM to map data...")
+            st.write("🤖 Querying Gemini LLM to map data...")
             system_prompt = """
             You are an expert insurance adjuster AI. Extract information from inspection reports (PDFs) and map them to fields in an insurance template.
             Return JSON. Use exact field names from template. Missing info -> "N/A".
@@ -158,7 +166,7 @@ if st.button("🚀 Process and Fill Template", type="primary"):
             Output JSON:
             """
             
-            llm_response = query_openrouter(api_key, system_prompt, user_prompt)
+            llm_response = query_gemini(api_key, system_prompt, user_prompt)
             
             if llm_response:
                 try:
