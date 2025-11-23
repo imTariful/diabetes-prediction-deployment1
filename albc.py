@@ -72,7 +72,7 @@ if st.button("🚀 Extract & Fill with Zero Misses", type="primary"):
     progress.progress(15)
     status.text(f"Found {len(placeholders)} fields: {', '.join(placeholders[:8])}{'...' if len(placeholders)>8 else ''}")
 
-    # Step 2: Upload files with display_only=True for better vision/OCR
+    # Step 2: Upload files (Fixed: Valid params only + display_name for better context)
     status.text("📤 Uploading sources to AI (high-res vision mode)...")
     gemini_files = []
     for file in source_files:
@@ -84,11 +84,11 @@ if st.button("🚀 Extract & Fill with Zero Misses", type="primary"):
         if mime_type is None:
             mime_type = "application/pdf" if tmp_path.lower().endswith(".pdf") else "image/jpeg"
 
-        # Use display_only=True for improved OCR/handwriting on images/PDFs
+        # Fixed upload: Use display_name for AI context (no invalid display_only)
         g_file = genai.upload_file(
             path=tmp_path, 
             mime_type=mime_type,
-            display_only=(media_resolution == "high")  # Enable high-res vision if selected
+            display_name=file.name  # Helps AI reference specific files
         )
         gemini_files.append(g_file)
         os.unlink(tmp_path)
@@ -133,7 +133,7 @@ Based on the above, analyze the attached files and extract ALL data. Output raw 
     progress.progress(50)
 
     try:
-        # First Pass (Fixed: No invalid config)
+        # First Pass (Fixed: Correct GenerationConfig import)
         response1 = model.generate_content(
             [extraction_prompt] + gemini_files,
             generation_config=genai.types.GenerationConfig(
