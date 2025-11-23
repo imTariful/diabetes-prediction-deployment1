@@ -28,7 +28,7 @@ with st.sidebar:
     st.divider()
     
     st.header("⚙️ Model Settings")
-    model_choice = st.selectbox("Choose Model", ["gemini-1.5-flash", "gemini-1.5-pro"])
+    model_choice = st.selectbox("Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
     st.caption("Flash is faster/cheaper. Pro is better for complex reasoning.")
 
 # --- Main File Uploads ---
