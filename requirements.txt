@@ -24,7 +24,16 @@ typing_extensions==4.12.2
 protobuf==5.29.3
 pillow==11.1.0
 
+
+# PDF / DOCX
 python-docx
 pymupdf
 pdf2image
 pytesseract
+PyPDF2
+
+python-docx
+pymupdf
+pdf2image
+pytesseract
+
