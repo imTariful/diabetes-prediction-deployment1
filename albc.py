@@ -55,7 +55,7 @@ def query_gemini_flash(api_key, system_prompt, user_prompt):
     }
     try:
         response = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta2/models/gemini-1.5-flash:generateMessage",
+            "https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.5-flash:generateMessage",
             headers=headers,
             json=payload
         )
