@@ -112,14 +112,10 @@ This tool automates the filling of insurance templates.
 3. The AI extracts data and fills the document.
 """)
 
-# Sidebar for API Key
-with st.sidebar:
-    st.header("Configuration")
-    api_key = st.secrets.get("OPENROUTER_API_KEY", "")
-    st.markdown("Recommended Model: `deepseek/deepseek-chat`")
-    
-    st.divider()
-    st.info("Ensure your DOCX has clear labels (e.g., 'Insured Name:', 'Date of Loss:') or placeholders.")
+# --- Hardcoded OpenRouter API Key ---
+api_key = "sk-4e7f07f783074bef9506f43831656335"  
+if not api_key or api_key == "YOUR_OPENROUTER_API_KEY_HERE":
+    st.warning("Please set your OpenRouter API key in the code to use the LLM.")
 
 # File Uploaders
 col1, col2 = st.columns(2)
@@ -130,8 +126,8 @@ with col2:
 
 # Processing Logic
 if st.button("🚀 Process and Fill Template", type="primary"):
-    if not api_key:
-        st.warning("Please provide an OpenRouter API Key in .streamlit/secrets.toml.")
+    if not api_key or api_key == "YOUR_OPENROUTER_API_KEY_HERE":
+        st.warning("OpenRouter API key is missing or invalid.")
     elif not docx_file or not pdf_files:
         st.warning("Please upload both a template and at least one PDF report.")
     else:
