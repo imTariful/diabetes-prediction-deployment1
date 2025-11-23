@@ -5,5 +5,4 @@ python3-pip
 ffmpeg
 libgl1
 libglib2.0-0
-tesseract-ocr
 poppler-utils
