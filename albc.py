@@ -1,9 +1,9 @@
 import streamlit as st
 import io
 import json
-import requests
 from docx import Document
 from PyPDF2 import PdfReader
+import google.generativeai as genai
 
 # --- CONFIGURATION ---
 st.set_page_config(
@@ -48,32 +48,20 @@ def extract_text_from_docx_for_context(docx_file):
                 
     return "\n".join(full_text)
 
-def query_gemini_flash(api_key, system_prompt, user_prompt):
+def query_gemini_flash(system_prompt, user_prompt):
     """
-    Query Google Gemini 1.5 Flash model via PaLM API
+    Query Gemini 1.5 Flash model using google-generativeai client.
     """
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    
-    payload = {
-        "prompt": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "model": "gemini-1.5-flash",  # Gemini 1.5 Flash model
-        "temperature": 0
-    }
-    
     try:
-        response = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta2/models/gemini-1.5-flash:generateMessage",
-            headers=headers,
-            json=payload
+        response = genai.chat(
+            model="gemini-1.5-flash",
+            messages=[
+                {"author": "system", "content": system_prompt},
+                {"author": "user", "content": user_prompt}
+            ],
+            temperature=0
         )
-        response.raise_for_status()
-        return response.json()["candidates"][0]["content"]
+        return response.last
     except Exception as e:
         st.error(f"LLM API Error: {str(e)}")
         return None
@@ -113,16 +101,10 @@ This tool automates the filling of insurance templates.
 3. The AI extracts data and fills the document.
 """)
 
-# --- Gemini API Key ---
-api_key = "AIzaSyDKeXrfDtNTkCCPznA1Uru6_c9tJk7Z1_Q"
-
+# --- Google Service Account JSON ---
 with st.sidebar:
-    typed_key = st.text_input("Gemini API Key (optional)", type="password")
-    if typed_key:
-        api_key = typed_key
-
-if not api_key or api_key == "YOUR_GEMINI_API_KEY_HERE":
-    st.warning("Please set your Gemini API key in the code or sidebar.")
+    st.header("Configuration")
+    service_account_json = st.file_uploader("Upload Service Account JSON", type=["json"])
 
 # File Uploaders
 col1, col2 = st.columns(2)
@@ -131,10 +113,14 @@ with col1:
 with col2:
     pdf_files = st.file_uploader("Upload Photo Reports (.pdf)", type=['pdf'], accept_multiple_files=True)
 
+# Initialize Gemini Client
+if service_account_json:
+    genai.configure(service_account_json=service_account_json)
+
 # Processing Logic
 if st.button("🚀 Process and Fill Template", type="primary"):
-    if not api_key or api_key == "YOUR_GEMINI_API_KEY_HERE":
-        st.warning("Gemini API key is missing or invalid.")
+    if not service_account_json:
+        st.warning("Please upload the Google service account JSON.")
     elif not docx_file or not pdf_files:
         st.warning("Please upload both a template and at least one PDF report.")
     else:
@@ -164,7 +150,7 @@ if st.button("🚀 Process and Fill Template", type="primary"):
             Output JSON:
             """
             
-            llm_response = query_gemini_flash(api_key, system_prompt, user_prompt)
+            llm_response = query_gemini_flash(system_prompt, user_prompt)
             
             if llm_response:
                 try:
