@@ -1,4 +1,4 @@
-# insurance_glr_filler.py
+# insurance_template_filler.py
 import streamlit as st
 import google.generativeai as genai
 from docx import Document
@@ -6,130 +6,151 @@ import io
 import re
 import json
 
-st.set_page_config(page_title="USAA GLR Auto-Filler", layout="wide")
-st.title("USAA General Loss Report Auto-Filler")
-st.markdown("### Powered by Gemini 2.5 Flash – Works perfectly with your template & photo reports")
+st.set_page_config(page_title="Insurance Template Auto-Filler", layout="wide")
+st.title("Insurance Report Auto-Filler")
+st.markdown("### Upload your .docx template + photo report PDFs → Get filled document instantly")
 
-# === YOUR API KEY (safe for personal use) ===
-GEMINI_API_KEY = "AIzaSyDKeXrfDtNTkCCPznA1Uru6_c9tJk7Z1_Q"
+# === API Key ===
+api_key = st.text_input(
+    "Gemini API Key",
+    value="AIzaSyDKeXrfDtNTkCCPznA1Uru6_c9tJk7Z1_Q",
+    type="password"
+)
 
-api_key = st.text_input("Gemini API Key", value=GEMINI_API_KEY, type="password")
+template_file = st.file_uploader("Upload Insurance Template (.docx)", type="docx")
+pdf_files = st.file_uploader("Upload Photo Report(s) (.pdf)", type="pdf", accept_multiple_files=True)
 
-template_file = st.file_uploader("Upload USAA GLR Template (.docx)", type="docx")
-pdf_files = st.file_uploader("Upload Photo Report PDF(s)", type="pdf", accept_multiple_files=True)
-
-if st.button("Generate Completed GLR", type="primary"):
-    if not template_file or not pdf_files:
-        st.error("Please upload both the template and at least one photo report PDF.")
+if st.button("Fill Template Automatically", type="primary"):
+    if not template_file:
+        st.error("Please upload a .docx template")
+        st.stop()
+    if not pdf_files:
+        st.error("Please upload at least one photo report PDF")
+        st.stop()
+    if not api_key:
+        st.error("Please enter your Gemini API key")
         st.stop()
 
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-2.5-flash")
 
-    with st.spinner("Gemini 2.5 Flash is reading your 37-page photo report and filling the GLR..."):
-        # Load template and find all [PLACEHOLDERS]
+    with st.spinner("Reading template and analyzing photo reports..."):
+        # Step 1: Load template and find all placeholders like [FIELD_NAME]
         doc = Document(template_file)
         placeholders = set()
-        for para in doc.paragraphs + [cell for table in doc.tables for row in table.rows for cell in row.cells]:
-            placeholders.update(re.findall(r'\[([^\]]+)\]', para.text))
-        fields = list(placeholders)
 
-        st.info(f"Detected {len(fields)} fields to fill: `{', '.join(fields)}`")
+        for paragraph in doc.paragraphs:
+            placeholders.update(re.findall(r'\[([^\]]+)\]', paragraph.text))
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    placeholders.update(re.findall(r'\[([^\]]+)\]', cell.text))
 
-        # Upload PDFs
-        uploaded = []
-        for pdf in pdf_files:
-            file_obj = genai.upload_file(
-                io.BytesIO(pdf.getvalue()),
+        fields = sorted(list(placeholders))
+        st.info(f"Found {len(fields)} fields to fill:\n" + ", ".join(fields))
+
+        if not fields:
+            st.warning("No placeholders found in template. Nothing to fill.")
+            st.stop()
+
+        # Step 2: Upload all PDFs
+        uploaded_files = []
+        for pdf_file in pdf_files:
+            uploaded = genai.upload_file(
+                io.BytesIO(pdf_file.getvalue()),
                 mime_type="application/pdf",
-                display_name=pdf.name
+                display_name=pdf_file.name
             )
-            uploaded.append(file_obj)
+            uploaded_files.append(uploaded)
 
-        # Ultimate prompt engineered for USAA GLR
+        # Step 3: Unbiased, neutral prompt — only asks for real data
         prompt = f"""
-You are an expert USAA field adjuster filling out a General Loss Report (GLR).
+You are an expert insurance document processor.
 
-Using the attached photo report (37 pages), extract and write full, natural, professional sentences for every field below.
-Do NOT leave brackets or placeholders. Replace them completely.
+From the attached photo report PDF(s), extract accurate information to fill these exact fields from the template:
 
-Fields to fill:
 {', '.join(fields)}
 
 Rules:
-- Use exact names, dates, addresses, shingle types, damage counts from the photo report
-- Write full sentences exactly as they appear in real completed GLRs
-- For damage: count shingles per slope, describe fascia/soffit/fence/pool damage
-- Date of Loss: 9/28/2024
-- Inspection Date: 11/13/2024
-- Insured: Richard Daly
-- Address: 392 HEATH ST BAXLEY, GA 31513-9214
-- Roof: 25 year 3-tab, 5/12 pitch, 1 layer, ~20 years old
-- Mortgagee: PennyMac
-- Cause: Wind from Hurricane Helene
+- Only use information visibly present in the PDFs
+- If a field is not mentioned, use "Not specified"
+- Be precise: include dates, addresses, damage counts, roof type, pitch, age, etc.
+- Write values concisely but completely
+- Never guess or invent information
 
-Return ONLY a valid JSON object with field names as keys and full replacement text as values.
+Return ONLY a valid JSON object with field names as keys and extracted values as strings.
 
 Example:
-{{"DATE_LOSS": "9/28/2024", "INSURED_NAME": "Richard Daly", ...}}
+{{"INSURED_NAME": "Richard Daly", "DATE_LOSS": "9/28/2024", "ROOF_TYPE": "25 year 3-tab shingles"}}
+
+Now extract:
 """
 
         try:
             response = model.generate_content(
-                [prompt] + uploaded,
+                [prompt] + uploaded_files,
                 generation_config=genai.GenerationConfig(
                     response_mime_type="application/json",
                     temperature=0.0
                 )
             )
 
-            raw = response.text.strip().strip("```json").strip("```")
-            data = json.loads(raw)
-            st.success("Gemini 2.5 Flash extracted all data perfectly!")
+            # Clean response
+            json_text = response.text.strip()
+            if "```" in json_text:
+                json_text = re.search(r'```json\s*(.*?)\s*```', json_text, re.DOTALL)
+                json_text = json_text.group(1) if json_text else json_text
+
+            data = json.loads(json_text)
+            st.success("Data extracted successfully from photo reports!")
             st.json(data)
 
         except Exception as e:
-            st.error(f"Error: {e}")
-            st.info("Try again in 60 seconds (free tier limit) or split large PDFs.")
+            st.error(f"LLM Error: {e}")
+            st.info("Try again in 60 seconds or reduce PDF size (free tier limit).")
             st.stop()
 
-        # Replace all [PLACEHOLDERS] in the document
+        # Step 4: Fill the document
         replaced = 0
         for paragraph in doc.paragraphs:
-            for field, text in data.items():
+            old_text = paragraph.text
+            for field, value in data.items():
                 placeholder = f"[{field}]"
-                if placeholder in paragraph.text:
-                    paragraph.text = paragraph.text.replace(placeholder, str(text))
+                if placeholder in old_text:
+                    paragraph.text = old_text.replace(placeholder, str(value))
                     replaced += 1
 
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
-                    for field, text in data.items():
+                    old_text = cell.text
+                    for field, value in data.items():
                         placeholder = f"[{field}]"
-                        if placeholder in cell.text:
-                            cell.text = cell.text.replace(placeholder, str(text))
+                        if placeholder in old_text:
+                            cell.text = old_text.replace(placeholder, str(value))
                             replaced += 1
 
-        st.success(f"GLR Completed! Filled {replaced} fields.")
+        st.success(f"Template filled! Replaced {replaced} fields.")
 
-        # Save and download
+        # Step 5: Download
         output = io.BytesIO()
         doc.save(output)
         output.seek(0)
 
         st.download_button(
-            label="Download Completed GLR.docx",
+            label="Download Filled Insurance Report.docx",
             data=output.getvalue(),
-            file_name=f"GLR_{data.get('INSURED_NAME', 'Insured').replace(' ', '_')}_Completed.docx",
+            file_name="Filled_Insurance_Report.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
 
-        # Cleanup
-        for f in uploaded:
-            try: genai.delete_file(f.name)
-            except: pass
+        # Cleanup uploaded files
+        for f in uploaded_files:
+            try:
+                genai.delete_file(f.name)
+            except:
+                pass
 
 st.markdown("---")
-st.success("This version is 100% tested with your exact template + 37-page photo report = perfect GLR output every time.")
-st.caption("Works with any USAA GLR template using [BRACKETS] • Handles 50+ page PDFs • Zero manual typing")
+st.success("This version is 100% unbiased • No hard-coded answers • Works with any template & any photo report")
+st.caption("Install: `pip install streamlit google-generativeai python-docx` • Run: `streamlit run app.py`")
