@@ -28,3 +28,12 @@ tqdm==4.67.1
 typing_extensions==4.12.2
 protobuf==5.29.3
 pillow==11.1.0
+
+
+streamlit
+opencv-python
+numpy
+Pillow
+tqdm
+
+
