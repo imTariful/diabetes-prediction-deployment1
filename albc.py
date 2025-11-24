@@ -5,7 +5,6 @@ import json
 import re
 import tempfile
 import os
-import mimetypes
 from datetime import datetime
 from typing import Dict, Any, List
 
@@ -58,12 +57,19 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
         st.error("Please provide API key, template, and source files.")
         st.stop()
 
-    progress = st.progress(0)
+    # progress uses 0.0 - 1.0 scale
+    progress = st.progress(0.0)
     status = st.empty()
 
-    # Step 1: Extract placeholders
+    # Step 1: Read template placeholders
     status.text("🔍 Reading template placeholders...")
-    doc = Document(template_file)
+    try:
+        template_bytes = template_file.read()
+        doc = Document(io.BytesIO(template_bytes))
+    except Exception as e:
+        st.error(f"Failed to read template: {e}")
+        st.stop()
+
     placeholder_pattern = r'\[([^\]]+)\]'
     placeholders = set()
 
@@ -76,50 +82,60 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
                     placeholders.update(re.findall(placeholder_pattern, paragraph.text))
 
     placeholders = sorted([p.strip() for p in placeholders if p.strip()])
-    
+
     if not placeholders:
         st.warning("No placeholders found! Use format like [Client Name], [Date].")
         st.stop()
 
-    progress.progress(10)
+    progress.progress(0.1)
     status.text(f"Found {len(placeholders)} fields: {', '.join(placeholders[:8])}{'...' if len(placeholders)>8 else ''}")
 
-    # Step 2: Extract text from all uploaded sources (PDFs and images)
+    # Step 2: Extract text from uploaded sources (PDFs and images)
     status.text("📚 Extracting text from source files (with OCR fallback)...")
     all_text_parts: List[str] = []
 
-    def ocr_image(path: str) -> str:
+    def ocr_image(path_or_pil) -> str:
+        """
+        Accepts a path string or a PIL Image object.
+        Returns OCR text (empty string on error).
+        """
         try:
-            img = Image.open(path)
+            if isinstance(path_or_pil, str):
+                img = Image.open(path_or_pil)
+            else:
+                img = path_or_pil
             return pytesseract.image_to_string(img)
         except Exception:
             return ""
 
     def extract_text_from_pdf(path: str) -> str:
-        text = []
+        text_pages = []
         try:
             with pdfplumber.open(path) as pdf:
                 for page in pdf.pages:
                     page_text = page.extract_text() or ""
-                    text.append(page_text)
+                    text_pages.append(page_text)
         except Exception:
-            pass
+            # pdfplumber failed; we'll attempt OCR below
+            text_pages = []
 
-        joined = "\n".join([t for t in text if t])
-        # If pdfplumber extracted nothing, fall back to OCR per page
+        joined = "\n".join([t for t in text_pages if t])
+        # If pdfplumber extracted nothing, fall back to OCR per page/image
         if len(joined.strip()) < 50:
             try:
                 pages = convert_from_path(path)
                 ocr_texts = [pytesseract.image_to_string(p) for p in pages]
                 joined = "\n".join(ocr_texts)
             except Exception:
-                # last resort: empty string
+                # last resort: keep joined (maybe empty)
                 joined = joined
 
         return joined
 
+    # Save uploaded files to temp and extract
     for file in source_files:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
+        ext = os.path.splitext(file.name)[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
             tmp.write(file.getvalue())
             tmp_path = tmp.name
 
@@ -139,7 +155,7 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
                 pass
 
     full_context = "\n\n".join(all_text_parts)
-    progress.progress(40)
+    progress.progress(0.4)
 
     # Step 3: Simple extraction heuristics per placeholder (with optional LLM fallback)
     status.text("🔄 Extracting fields from sources...")
@@ -182,11 +198,15 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
             return val, conf, best_line
         return "Not Found", 0.0, ""
 
+    # Iterate placeholders and update progress in 0.4 -> 0.9 range
+    total = len(placeholders)
     for i, field in enumerate(placeholders):
         val, conf, snippet = find_best_line(field, full_context)
         extracted_data[field] = {"value": val, "confidence": conf, "source_snippet": snippet}
-        progress.progress(40 + (50 * (i + 1) / len(placeholders)))
-        status.text(f"Processed {i+1}/{len(placeholders)}: {field}")
+        # scale progress between 0.4 and 0.9 while iterating
+        progress_value = 0.4 + 0.5 * ((i + 1) / total)
+        progress.progress(progress_value)
+        status.text(f"Processed {i+1}/{total}: {field}")
 
     # LLM fallback for low-confidence fields using Gemini (if available)
     def call_gemini_for_field(field: str, context: str) -> dict:
@@ -235,6 +255,9 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
                 else:
                     parsed = {"value": text.strip(), "confidence": 0.0, "source_snippet": text.strip()}
 
+            # Ensure parsed has expected fields
+            if not isinstance(parsed, dict):
+                return {"value": str(parsed), "confidence": 0.0, "source_snippet": str(parsed)}
             return parsed
         except Exception as e:
             return {"value": "", "confidence": 0.0, "source_snippet": f"Gemini error: {e}"}
@@ -245,12 +268,16 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
             ctx = full_context[:8000] if full_context else ""
             parsed = call_gemini_for_field(key, ctx)
             if parsed and parsed.get("value"):
-                extracted_data[key] = {"value": parsed.get("value"), "confidence": parsed.get("confidence", 0.0), "source_snippet": parsed.get("source_snippet", info.get("source_snippet",""))}
+                extracted_data[key] = {
+                    "value": parsed.get("value"),
+                    "confidence": parsed.get("confidence", 0.0),
+                    "source_snippet": parsed.get("source_snippet", info.get("source_snippet", ""))
+                }
             llm_calls += 1
     if llm_calls:
         status.text(f"Called Gemini for {llm_calls} low-confidence fields")
 
-    progress.progress(90)
+    progress.progress(0.9)
     status.text("📝 Filling template...")
 
     # Preview Extracted Data
@@ -273,6 +300,7 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
     def replace_in_paragraph(paragraph, key, value):
         placeholder = f"[{key}]"
         if placeholder in paragraph.text:
+            # preserve runs; replace where placeholder appears
             for run in paragraph.runs:
                 if placeholder in run.text:
                     run.text = run.text.replace(placeholder, str(value))
@@ -292,10 +320,14 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
 
     # Download
     bio = io.BytesIO()
-    doc.save(bio)
+    try:
+        doc.save(bio)
+    except Exception as e:
+        st.error(f"Failed to save filled document: {e}")
+        st.stop()
     bio.seek(0)
 
-    progress.progress(100)
+    progress.progress(1.0)
     status.text("✅ RAG Complete! Form filled with grounded extractions.")
 
     st.download_button(
@@ -303,8 +335,8 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
         data=bio,
         file_name=f"RAG_Filled_{template_file.name.replace('.docx', '')}_{datetime.now().strftime('%Y%m%d')}.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        type="primary"
+        key="download-filled-doc"
     )
 
-    # Cleanup (optional: persist Chroma if needed)
+    # Cleanup (optional: persist vectorstore if needed)
     # vectorstore.delete_collection()
