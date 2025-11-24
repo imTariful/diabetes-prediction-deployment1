@@ -13,3 +13,12 @@ unstructured[all-docs]
 pillow==10.4.0
 pytesseract==0.3.13
 python-dotenv==1.0.1
+streamlit
+python-docx
+pdfplumber
+pdf2image
+pillow
+pytesseract
+
+google-generativeai
+
