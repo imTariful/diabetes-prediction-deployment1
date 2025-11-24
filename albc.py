@@ -14,6 +14,12 @@ from PIL import Image
 import pytesseract
 from pdf2image import convert_from_path
 
+# Optional Gemini LLM client will be imported at runtime for fallback
+try:
+    import google.generativeai as genai  # type: ignore
+except Exception:
+    genai = None
+
 # --- Page Config ---
 st.set_page_config(page_title="RAG-Powered Universal AI Document Filler", layout="wide", page_icon="🧠")
 st.title("🧠 RAG-Powered Universal AI Document Filler")
@@ -27,11 +33,13 @@ Upload template (.docx) and sources (PDFs, images, scans). AI fills perfectly.
 # --- Sidebar ---
 with st.sidebar:
     st.header("Gemini Configuration")
-    api_key = st.text_input("Gemini API Key", type="password", help="Get free key: https://aistudio.google.com/app/apikey")
+    # Allow default from environment variable so user can avoid pasting secrets into the UI
+    env_key = os.getenv("GEMINI_API_KEY", "")
+    api_key = st.text_input("Gemini API Key", type="password", value=env_key, help="Get free key: https://aistudio.google.com/app/apikey")
     model_choice = st.selectbox(
         "Model (Pro for handwriting/complex docs)",
         ["gemini-2.5-flash", "gemini-2.5-pro"],
-        index=1
+        index=0
     )
     embedding_model = "models/embedding-001"  # Gemini's embedding model (free tier available)
     chunk_size = st.slider("Chunk Size (tokens)", 256, 1024, 512, help="Smaller = finer retrieval")
@@ -179,6 +187,68 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
         extracted_data[field] = {"value": val, "confidence": conf, "source_snippet": snippet}
         progress.progress(40 + (50 * (i + 1) / len(placeholders)))
         status.text(f"Processed {i+1}/{len(placeholders)}: {field}")
+
+    # LLM fallback for low-confidence fields using Gemini (if available)
+    def call_gemini_for_field(field: str, context: str) -> dict:
+        if not genai:
+            return {"value": "", "confidence": 0.0, "source_snippet": "Gemini client not installed"}
+
+        prompt = (
+            f"You are given extracted text from insurance photo reports.\n\n"
+            f"Context:\n{context}\n\n"
+            f"Extract the best value for the template field [{field}].\n"
+            "If you cannot find a value, return value as empty string and confidence 0.\n"
+            "Respond ONLY with a JSON object: {\"value\": \"...\", \"confidence\": 0.0-1.0, \"source_snippet\": \"...\"}"
+        )
+
+        try:
+            genai.configure(api_key=api_key)
+            text = ""
+            try:
+                if hasattr(genai, "generate"):
+                    resp = genai.generate(model=model_choice, prompt=prompt)
+                    text = getattr(resp, "text", "") or getattr(resp, "output", "")
+                elif hasattr(genai, "chat") and hasattr(genai.chat, "create"):
+                    resp = genai.chat.create(model=model_choice, messages=[{"role": "user", "content": prompt}])
+                    if hasattr(resp, "last"):
+                        text = getattr(resp.last, "content", "")
+                    else:
+                        try:
+                            text = resp.choices[0].message.content
+                        except Exception:
+                            text = str(resp)
+                else:
+                    resp = genai.chat.create(model=model_choice, messages=[{"role": "user", "content": prompt}])
+                    text = str(resp)
+            except Exception as e:
+                return {"value": "", "confidence": 0.0, "source_snippet": f"LLM call failed: {e}"}
+
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                m = re.search(r"\{.*\}", text, re.S)
+                if m:
+                    try:
+                        parsed = json.loads(m.group(0))
+                    except Exception:
+                        parsed = {"value": text.strip(), "confidence": 0.0, "source_snippet": text.strip()}
+                else:
+                    parsed = {"value": text.strip(), "confidence": 0.0, "source_snippet": text.strip()}
+
+            return parsed
+        except Exception as e:
+            return {"value": "", "confidence": 0.0, "source_snippet": f"Gemini error: {e}"}
+
+    llm_calls = 0
+    for key, info in list(extracted_data.items()):
+        if info.get("confidence", 0) < 0.6:
+            ctx = full_context[:8000] if full_context else ""
+            parsed = call_gemini_for_field(key, ctx)
+            if parsed and parsed.get("value"):
+                extracted_data[key] = {"value": parsed.get("value"), "confidence": parsed.get("confidence", 0.0), "source_snippet": parsed.get("source_snippet", info.get("source_snippet",""))}
+            llm_calls += 1
+    if llm_calls:
+        status.text(f"Called Gemini for {llm_calls} low-confidence fields")
 
     progress.progress(90)
     status.text("📝 Filling template...")
