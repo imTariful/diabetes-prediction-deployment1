@@ -8,3 +8,6 @@ pdfplumber
 pytesseract
 pdf2image
 Pillow
+rapidfuzz
+
+
