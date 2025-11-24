@@ -1,13 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
 from docx import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.docstore.document import Document as LCDocument
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
 import io
 import json
 import re
@@ -16,6 +8,11 @@ import os
 import mimetypes
 from datetime import datetime
 from typing import Dict, Any, List
+
+import pdfplumber
+from PIL import Image
+import pytesseract
+from pdf2image import convert_from_path
 
 # --- Page Config ---
 st.set_page_config(page_title="RAG-Powered Universal AI Document Filler", layout="wide", page_icon="🧠")
@@ -53,10 +50,6 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
         st.error("Please provide API key, template, and source files.")
         st.stop()
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_choice)
-    embeddings = GoogleGenerativeAIEmbeddings(model=embedding_model, google_api_key=api_key)
-
     progress = st.progress(0)
     status = st.empty()
 
@@ -83,65 +76,107 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
     progress.progress(10)
     status.text(f"Found {len(placeholders)} fields: {', '.join(placeholders[:8])}{'...' if len(placeholders)>8 else ''}")
 
-    # Step 2: RAG Indexing - Load, Chunk, Embed Sources
-    status.text("📚 RAG Indexing: Extracting & embedding source chunks...")
-    documents = []
+    # Step 2: Extract text from all uploaded sources (PDFs and images)
+    status.text("📚 Extracting text from source files (with OCR fallback)...")
+    all_text_parts: List[str] = []
+
+    def ocr_image(path: str) -> str:
+        try:
+            img = Image.open(path)
+            return pytesseract.image_to_string(img)
+        except Exception:
+            return ""
+
+    def extract_text_from_pdf(path: str) -> str:
+        text = []
+        try:
+            with pdfplumber.open(path) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text() or ""
+                    text.append(page_text)
+        except Exception:
+            pass
+
+        joined = "\n".join([t for t in text if t])
+        # If pdfplumber extracted nothing, fall back to OCR per page
+        if len(joined.strip()) < 50:
+            try:
+                pages = convert_from_path(path)
+                ocr_texts = [pytesseract.image_to_string(p) for p in pages]
+                joined = "\n".join(ocr_texts)
+            except Exception:
+                # last resort: empty string
+                joined = joined
+
+        return joined
+
     for file in source_files:
         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
             tmp.write(file.getvalue())
             tmp_path = tmp.name
 
-        if file.name.lower().endswith('.pdf'):
-            loader = PyPDFLoader(tmp_path)
-            docs = loader.load()
-        else:  # Images: Use Gemini Vision to extract text/description
-            g_file = genai.upload_file(path=tmp_path, mime_type=mimetypes.guess_type(tmp_path)[0] or "image/jpeg")
-            vision_prompt = "Extract all text, describe images, and summarize key details (names, dates, numbers, descriptions)."
-            vision_response = model.generate_content([vision_prompt, g_file])
-            docs = [LCDocument(page_content=vision_response.text, metadata={"source": file.name})]
-            genai.delete_file(g_file.name)
+        try:
+            if file.name.lower().endswith('.pdf'):
+                text = extract_text_from_pdf(tmp_path)
+            else:
+                # image files
+                text = ocr_image(tmp_path)
 
-        documents.extend(docs)
-        os.unlink(tmp_path)
+            if text and text.strip():
+                all_text_parts.append(f"--- Source: {file.name} ---\n{text}")
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=50)
-    chunks = text_splitter.split_documents(documents)
-
-    # Embed & Store in Chroma (in-memory for simplicity; use persist_directory for production)
-    vectorstore = Chroma.from_documents(chunks, embeddings, persist_directory=tempfile.mkdtemp())
+    full_context = "\n\n".join(all_text_parts)
     progress.progress(40)
 
-    # Step 3: RAG Retrieval & Generation per Placeholder
-    status.text("🔄 RAG Pipeline: Retrieving & extracting per field...")
-    extracted_data = {}
-    prompt_template = """
-    Context from sources: {context}
+    # Step 3: Simple extraction heuristics per placeholder (with optional LLM fallback)
+    status.text("🔄 Extracting fields from sources...")
+    extracted_data: Dict[str, Any] = {}
 
-    Template Field: {field}
+    # Basic regex helpers
+    date_re = re.compile(r"(\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b)")
+    number_re = re.compile(r"\b\d[\d,./-]{1,50}\b")
 
-    Extract the exact value for [{field}] from the context only. Use semantic matching (e.g., [DATE_LOSS] → "DOL" or "Incident Date").
-    If missing: "Not Found".
-    Output JSON: {{"value": "extracted_value", "confidence": 0.9, "source_snippet": "brief quote"}}
-    """
-    chain = (
-        ChatPromptTemplate.from_template(prompt_template)
-        | model  # Use Gemini as LLM
-        | JsonOutputParser()
-    )
+    def find_best_line(field: str, text: str) -> tuple[str, float, str]:
+        # Look for lines containing tokens from field name
+        tokens = [t.lower() for t in re.findall(r"\w+", field) if len(t) > 2]
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        best_score = 0.0
+        best_line = ""
+        for line in lines:
+            line_lower = line.lower()
+            score = sum(1 for t in tokens if t in line_lower)
+            if score > best_score:
+                best_score = score
+                best_line = line
+
+        # heuristics to extract value from the line
+        if best_line:
+            # if line contains colon or dash, take RHS
+            if ":" in best_line:
+                val = best_line.split(":", 1)[1].strip()
+            elif "-" in best_line:
+                val = best_line.split("-", 1)[1].strip()
+            else:
+                # try date or number
+                d = date_re.search(best_line)
+                if d:
+                    val = d.group(0)
+                else:
+                    n = number_re.search(best_line)
+                    val = n.group(0) if n else best_line
+
+            conf = min(0.9, 0.3 + 0.2 * best_score)
+            return val, conf, best_line
+        return "Not Found", 0.0, ""
 
     for i, field in enumerate(placeholders):
-        # Semantic query for retrieval
-        query = f"What is the value for '{field}'? Look for related terms like {field.lower().replace('_', ' or ')}."
-        relevant_chunks = vectorstore.similarity_search(query, k=top_k)
-        context = "\n\n".join([chunk.page_content for chunk in relevant_chunks])
-
-        # Generate with RAG-augmented prompt
-        try:
-            response = chain.invoke({"context": context, "field": field})
-            extracted_data[field] = response
-        except Exception as e:
-            extracted_data[field] = {"value": "Not Found", "confidence": 0.0, "source_snippet": str(e)}
-
+        val, conf, snippet = find_best_line(field, full_context)
+        extracted_data[field] = {"value": val, "confidence": conf, "source_snippet": snippet}
         progress.progress(40 + (50 * (i + 1) / len(placeholders)))
         status.text(f"Processed {i+1}/{len(placeholders)}: {field}")
 
@@ -170,12 +205,12 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
         if placeholder in paragraph.text:
             for run in paragraph.runs:
                 if placeholder in run.text:
-                    run.text = run.text.replace(placeholder, str(value["value"]))
+                    run.text = run.text.replace(placeholder, str(value))
 
     for p in doc.paragraphs:
         for key in placeholders:
             if key in extracted_data:
-                replace_in_paragraph(p, key, extracted_data[key])
+                replace_in_paragraph(p, key, extracted_data[key]["value"])
 
     for table in doc.tables:
         for row in table.rows:
@@ -183,7 +218,7 @@ if st.button("🚀 RAG-Extract & Fill Form", type="primary"):
                 for p in cell.paragraphs:
                     for key in placeholders:
                         if key in extracted_data:
-                            replace_in_paragraph(p, key, extracted_data[key])
+                            replace_in_paragraph(p, key, extracted_data[key]["value"])
 
     # Download
     bio = io.BytesIO()
